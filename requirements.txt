@@ -1,0 +1,23 @@
+# NEXUS Core Dependencies
+# Note: This is the initial requirements file for setting up the development environment.
+# Additional dependencies will be added as implementation progresses.
+
+# Core simulation and data handling
+numpy>=1.24.0
+pandas>=2.0.0
+
+# For potential future use (not implemented yet)
+# torch>=2.0.0  # For PyTorch-based models
+# transformers>=4.0.0  # For Hugging Face transformers
+# fastapi>=0.68.0  # For API development
+# uvicorn>=0.15.0  # For ASGI server
+# pydantic>=2.0.0  # For data validation
+
+# Development and testing
+pytest>=7.0.0
+black>=23.0.0
+flake8>=6.0.0
+
+# Documentation
+# sphinx>=5.0.0  # For documentation generation
+# myst-parser>=0.18.0  # For Markdown support in Sphinx
