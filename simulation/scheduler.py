@@ -1,159 +1,230 @@
 """
-Event Scheduler Module
-Implements event scheduling and processing logic for NEXUS Core.
+Deterministic event scheduler for the NEXUS simulation engine.
+
+The scheduler is responsible only for ordering scheduled work.
+Authoritative simulation Events remain immutable records and are never
+responsible for mutating WorldState themselves.
 """
 
 import heapq
-from typing import List, Any, Callable, Optional
+from dataclasses import dataclass
+from typing import Any, Callable
+
 from .events import Event
 
 
+@dataclass(frozen=True)
+class _ScheduledItem:
+    """Internal scheduler entry."""
+
+    event: Event | None
+    callback: Callable[[Any, Any], None] | None
+    callback_data: Any
+    schedule_id: str
+    tick: int
+    sequence: int
+
+
 class Scheduler:
-    """Manages scheduling and processing of events in the simulation."""
+    """Deterministic tick-based scheduler."""
 
-    def __init__(self):
-        """Initialize the event scheduler."""
-        # Using a heap queue for efficient event retrieval
-        self._event_queue: List[tuple] = []  # (timestamp, sequence_count, event)
-        self._sequence_count = 0  # To ensure FIFO ordering for same timestamp
-        self._scheduled_events: dict = {}  # For potential cancellation by ID
-        self._cancelled_events: set = set()  # Track cancelled event IDs
+    def __init__(self) -> None:
+        self._event_queue: list[tuple[int, int, _ScheduledItem]] = []
+        self._sequence_count = 0
+        self._scheduled_events: dict[str, _ScheduledItem] = {}
 
-    def schedule_event(self, event_time: float, event: Event, event_id: Optional[str] = None) -> Optional[str]:
-        """Schedule an event for future processing.
+    def _next_id(self) -> str:
+        schedule_id = f"event_{self._sequence_count}"
+        return schedule_id
 
-        Args:
-            event_time (float): Time at which to schedule the event
-            event (Event): Event to schedule
-            event_id (str, optional): Identifier for potential cancellation
-
-        Returns:
-            str: The event ID used for scheduling (generated if not provided)
+    def schedule_event(
+        self,
+        event_time: int,
+        event: Event,
+        event_id: str | None = None,
+    ) -> str:
         """
-        if event_id is None:
-            event_id = f"event_{self._sequence_count}"
+        Schedule an authoritative Event.
 
-        # Push to heap queue: (timestamp, sequence_count, event)
-        heapq.heappush(self._event_queue, (event_time, self._sequence_count, event))
+        Events are ordered by tick and then insertion sequence.
+        """
+
+        if event_time < 0:
+            raise ValueError("event_time must be non-negative")
+
+        if event.tick != event_time:
+            raise ValueError(
+                "event.tick must match the scheduler event_time"
+            )
+
+        if event_id is None:
+            event_id = self._next_id()
+
+        if event_id in self._scheduled_events:
+            raise ValueError(f"Duplicate schedule ID: {event_id}")
+
+        sequence = self._sequence_count
         self._sequence_count += 1
 
-        # Store for potential cancellation
-        if event_id:
-            self._scheduled_events[event_id] = (event_time, self._sequence_count - 1, event)
+        item = _ScheduledItem(
+            event=event,
+            callback=None,
+            callback_data=None,
+            schedule_id=event_id,
+            tick=event_time,
+            sequence=sequence,
+        )
+
+        heapq.heappush(
+            self._event_queue,
+            (event_time, sequence, item),
+        )
+
+        self._scheduled_events[event_id] = item
 
         return event_id
 
-    def schedule_event_callback(self, event_time: float, callback: Callable, event_data: Any = None,
-                              event_id: Optional[str] = None) -> Optional[str]:
-        """Schedule a callback function for future processing.
-
-        Args:
-            event_time (float): Time at which to schedule the callback
-            callback (callable): Function to call when event occurs
-            event_data (any, optional): Data to pass to the callback
-            event_id (str, optional): Identifier for potential cancellation
-
-        Returns:
-            str: The event ID used for scheduling (generated if not provided)
+    def schedule_event_callback(
+        self,
+        event_time: int,
+        callback: Callable[[Any, Any], None],
+        event_data: Any = None,
+        event_id: str | None = None,
+    ) -> str:
         """
-        # Create a wrapper event that executes the callback
-        class CallbackEvent(Event):
-            def __init__(self, timestamp, callback, data):
-                super().__init__(timestamp, "callback", data or {})
-                self.callback = callback
+        Schedule an internal callback.
 
-            def process(self, world):
-                self.callback(world, self.data)
+        Callback work is deliberately not represented as an Event because
+        callbacks are execution mechanics, not authoritative simulation
+        history.
+        """
 
-        callback_event = CallbackEvent(event_time, callback, event_data)
-        return self.schedule_event(event_time, callback_event, event_id)
+        if event_time < 0:
+            raise ValueError("event_time must be non-negative")
+
+        if event_id is None:
+            event_id = self._next_id()
+
+        if event_id in self._scheduled_events:
+            raise ValueError(f"Duplicate schedule ID: {event_id}")
+
+        sequence = self._sequence_count
+        self._sequence_count += 1
+
+        item = _ScheduledItem(
+            event=None,
+            callback=callback,
+            callback_data=event_data,
+            schedule_id=event_id,
+            tick=event_time,
+            sequence=sequence,
+        )
+
+        heapq.heappush(
+            self._event_queue,
+            (event_time, sequence, item),
+        )
+
+        self._scheduled_events[event_id] = item
+
+        return event_id
 
     def cancel_event(self, event_id: str) -> bool:
-        """Cancel a scheduled event.
-
-        Args:
-            event_id (str): Identifier of the event to cancel
-
-        Returns:
-            bool: True if event was found and cancelled, False otherwise
         """
-        if event_id in self._scheduled_events:
-            # Get the event details to remove from heap
-            timestamp, sequence_count, event = self._scheduled_events[event_id]
+        Cancel a scheduled item.
 
-            # Remove from scheduled events tracking
-            del self._scheduled_events[event_id]
-
-            # Rebuild heap without the cancelled event
-            # This is O(n) but acceptable for Stage 1
-            new_queue = []
-            for item in self._event_queue:
-                ts, seq, ev = item
-                # Check if this is the event to cancel (matching timestamp and sequence count)
-                if not (ts == timestamp and seq == sequence_count and ev is event):
-                    new_queue.append(item)
-
-            self._event_queue = new_queue
-            heapq.heapify(self._event_queue)
-
-            return True
-        return False
-
-    def process_events(self, current_time: float) -> List[Event]:
-        """Process all events scheduled up to the current time.
-
-        Args:
-            current_time (float): Current simulation time
-
-        Returns:
-            list: Events that were processed
+        Cancellation removes the item from the tracking map. The heap is
+        rebuilt so cancelled work cannot later be processed.
         """
-        processed = []
 
-        # Extract all events that should be processed at or before current_time
+        item = self._scheduled_events.pop(event_id, None)
+
+        if item is None:
+            return False
+
+        self._event_queue = [
+            queued
+            for queued in self._event_queue
+            if queued[2] is not item
+        ]
+        heapq.heapify(self._event_queue)
+
+        return True
+
+    def process_events(self, current_time: int) -> list[Event]:
+        """
+        Process all scheduled authoritative Events up to current_time.
+
+        Callback tasks execute against the supplied world through
+        process_callbacks(); they are not returned as Events.
+        """
+
+        processed: list[Event] = []
+
         while self._event_queue and self._event_queue[0][0] <= current_time:
-            timestamp, sequence_count, event = heapq.heappop(self._event_queue)
-            # Check if this event has been cancelled
-            # We need to reconstruct the event_id to check if it's cancelled
-            # Since we don't store event_id in the heap, we'll check if any scheduled
-            # events matching this timestamp/sequence were cancelled
-            # For simplicity in Stage 1, we'll process all events and let cancellation
-            # work by removing from scheduled_events (which we check elsewhere if needed)
-            processed.append(event)
+            _, _, item = heapq.heappop(self._event_queue)
+            self._scheduled_events.pop(item.schedule_id, None)
+
+            if item.event is not None:
+                processed.append(item.event)
 
         return processed
 
-    def get_upcoming_events(self, count: int = 10) -> List[Event]:
-        """Get the next upcoming events without processing them.
-
-        Args:
-            count (int): Maximum number of events to return
-
-        Returns:
-            list: Upcoming events
+    def process_callbacks(self, current_time: int, world: Any) -> int:
         """
-        # Return a copy of the next events without removing them from queue
-        # We need to sort by timestamp since heap queue only guarantees first element is smallest
-        upcoming = []
-        # Create a list of (timestamp, event) for sorting
-        timestamp_event_list = [(timestamp, event) for timestamp, _, event in self._event_queue]
-        # Sort by timestamp
-        timestamp_event_list.sort(key=lambda x: x[0])
-        # Extract the events up to the requested count
-        for timestamp, event in timestamp_event_list[:count]:
-            upcoming.append(event)
-        return upcoming
+        Execute scheduled callbacks up to current_time.
+
+        Returns the number of callbacks executed.
+
+        Authoritative Events are left untouched by this method.
+        """
+
+        ready_callbacks: list[_ScheduledItem] = []
+        remaining: list[tuple[int, int, _ScheduledItem]] = []
+
+        while self._event_queue:
+            tick, sequence, item = heapq.heappop(self._event_queue)
+
+            if tick <= current_time and item.callback is not None:
+                ready_callbacks.append(item)
+                self._scheduled_events.pop(item.schedule_id, None)
+            else:
+                remaining.append((tick, sequence, item))
+
+        for entry in remaining:
+            heapq.heappush(self._event_queue, entry)
+
+        for item in ready_callbacks:
+            item.callback(world, item.callback_data)
+
+        return len(ready_callbacks)
+
+    def get_upcoming_events(self, count: int = 10) -> list[Event]:
+        """Return upcoming authoritative Events without consuming them."""
+
+        if count < 0:
+            raise ValueError("count must be non-negative")
+
+        upcoming = [
+            item
+            for _, _, item in sorted(self._event_queue)
+            if item.event is not None
+        ]
+
+        return [
+            item.event
+            for item in upcoming[:count]
+            if item.event is not None
+        ]
 
     def get_event_count(self) -> int:
-        """Get the number of scheduled events.
+        """Return the number of scheduled items."""
 
-        Returns:
-            int: Number of scheduled events
-        """
         return len(self._event_queue)
 
-    def clear(self):
-        """Clear all scheduled events."""
+    def clear(self) -> None:
+        """Remove all scheduled work and reset deterministic sequencing."""
+
         self._event_queue.clear()
         self._scheduled_events.clear()
         self._sequence_count = 0

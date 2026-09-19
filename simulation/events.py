@@ -1,88 +1,62 @@
-"""
-Events Module
-Implements event definitions and handling logic for NEXUS Core.
-"""
-
-from typing import Dict, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any, Literal
 import json
 
 
-@dataclass
+EventType = Literal[
+    "IntrusionDetected",
+    "HostCompromised",
+    "HostIsolated",
+    "HostPatched",
+    "DataExfiltrated",
+    "ServiceDown",
+    "ServiceRestored",
+    "PolicyChanged",
+    "AgentActionTaken",
+    "AgentActionRejected",
+    "CustomerNotified",
+    "ExecutiveBriefed",
+    "TickCompleted",
+]
+
+
+@dataclass(frozen=True)
 class Event:
-    """Base class for all simulation events."""
+    event_id: int
+    tick: int
+    event_type: EventType
+    actor_id: str | None = None
+    payload: dict[str, Any] = field(default_factory=dict)
+    visibility_tags: frozenset[str] = field(default_factory=frozenset)
 
-    timestamp: float
-    event_type: str
-    data: Dict[str, Any] = None
-
-    def __post_init__(self):
-        """Initialize data as empty dict if None."""
-        if self.data is None:
-            self.data = {}
-
-    def process(self, world):
-        """Process this event in the context of the world.
-
-        Args:
-            world (World): The world instance to process the event in
-        """
-        # Delegate to world's event processing
-        world._apply_event(self)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert event to dictionary representation.
-
-        Returns:
-            dict: Dictionary representation of the event
-        """
+    def to_dict(self) -> dict[str, Any]:
         return {
-            "timestamp": self.timestamp,
+            "event_id": self.event_id,
+            "tick": self.tick,
             "event_type": self.event_type,
-            "data": self.data.copy() if self.data else {}
+            "actor_id": self.actor_id,
+            "payload": self.payload,
+            "visibility_tags": sorted(self.visibility_tags),
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Event':
-        """Create event from dictionary representation.
-
-        Args:
-            data (dict): Dictionary representation of the event
-
-        Returns:
-            Event: Reconstructed event instance
-        """
+    def from_dict(cls, data: dict[str, Any]) -> "Event":
         return cls(
-            timestamp=data["timestamp"],
+            event_id=int(data["event_id"]),
+            tick=int(data["tick"]),
             event_type=data["event_type"],
-            data=data.get("data", {}).copy()
+            actor_id=data.get("actor_id"),
+            payload=dict(data.get("payload", {})),
+            visibility_tags=frozenset(data.get("visibility_tags", [])),
         )
 
     def to_json(self) -> str:
-        """Convert event to JSON string.
-
-        Returns:
-            str: JSON representation of the event
-        """
-        return json.dumps(self.to_dict())
+        return json.dumps(
+            self.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
 
     @classmethod
-    def from_json(cls, json_str: str) -> 'Event':
-        """Create event from JSON string.
-
-        Args:
-            json_str (str): JSON representation of the event
-
-        Returns:
-            Event: Reconstructed event instance
-        """
-        data = json.loads(json_str)
-        return cls.from_dict(data)
-
-    def __str__(self) -> str:
-        """String representation of the event."""
-        return f"Event(t={self.timestamp}, type={self.event_type}, data={self.data})"
-
-    def __repr__(self) -> str:
-        """Detailed string representation of the event."""
-        return self.__str__()
+    def from_json(cls, value: str) -> "Event":
+        return cls.from_dict(json.loads(value))
