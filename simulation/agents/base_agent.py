@@ -5,13 +5,20 @@ from collections import deque
 
 @dataclass
 class AgentState:
-    """Mutable runtime state for an agent."""
-
-    health: float = 1.0
-    energy: float = 1.0
+    """Agent state for deterministic cyber simulation."""
+    agent_id: str = ""
+    role: str = ""
+    current_host: Optional[str] = None
+    compromised: bool = False
+    privilege_level: int = 0  # 0=user, 1=admin, 2=SYSTEM/root
+    discovered_hosts: Set[str] = field(default_factory=set)
+    access_tokens: Dict[str, str] = field(default_factory=dict)
+    known_vulnerabilities: Dict[str, List[str]] = field(default_factory=dict)
+    action_history: List[str] = field(default_factory=list)
     resources: Dict[str, float] = field(default_factory=dict)
     status: str = "active"
-    position: Optional[str] = None
+    health: float = 1.0
+    energy: float = 1.0
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 

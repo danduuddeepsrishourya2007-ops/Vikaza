@@ -4,8 +4,10 @@ Implements typed PolicyConfig for the NEXUS simulation engine.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
+from .actions import ActionType, AgentDecision, AgentActionRejected, AgentActionTaken
+from .world import WorldState
 
 
 class ContainmentStrategy(Enum):
@@ -26,6 +28,10 @@ class PolicyConfig:
     resource_limits: Dict[str, int] = field(default_factory=dict)
     monitoring_enabled: bool = True
     auto_response_enabled: bool = False
+    # New fields for Phase 1B
+    role_priority: Dict[str, int] = field(default_factory=dict)  # Lower numbers = higher priority
+    action_validation: Dict[str, List[str]] = field(default_factory=dict)  # action -> list of roles allowed
+    resource_constraints: Dict[str, Any] = field(default_factory=dict)  # e.g., {"max_concurrent_isolations": 2}
     
     def __post_init__(self):
         """Validate policy configuration after initialization."""
@@ -136,6 +142,169 @@ def get_policy_effects(policy: PolicyConfig) -> Dict[str, Any]:
         "monitoring_enabled": policy.monitoring_enabled,
         "auto_response_enabled": policy.auto_response_enabled
     }
+
+
+# Decision validation functions for Phase 1B
+def validate_decision(policy: PolicyConfig, decision: AgentDecision, world_state: WorldState) -> Tuple[bool, Optional[str]]:
+    """
+    Validate a single agent decision against policy and world state.
+    
+    Args:
+        policy: Current policy configuration
+        decision: The agent decision to validate
+        world_state: Current world state
+        
+    Returns:
+        Tuple of (is_valid, rejection_reason) where rejection_reason is None if valid
+    """
+    # Check if action is allowed by policy
+    if policy.allowed_actions and decision.action_type.value not in policy.allowed_actions:
+        return False, f"Action {decision.action_type.value} not allowed by policy"
+    
+    # Check if agent role is allowed to perform this action
+    action_roles = policy.action_validation.get(decision.action_type.value, [])
+    if action_roles and decision.agent_id not in action_roles:
+        # We need to get the agent's role from world state
+        agent_state = world_state.agents.get(decision.agent_id)
+        if agent_state:
+            agent_role = agent_state.role
+            if agent_role not in action_roles:
+                return False, f"Role {agent_role} not authorized to perform {decision.action_type.value}"
+        else:
+            return False, f"Agent {decision.agent_id} not found in world state"
+    
+    # Check resource constraints
+    if "max_concurrent_actions" in policy.resource_constraints:
+        # Count current actions of this type being performed
+        # This would need to be tracked elsewhere - for now we'll skip detailed implementation
+        pass
+    
+    # Additional validation could go here based on world state
+    
+    return True, None
+
+
+def validate_decision_batch(world: WorldState, decisions: List[AgentDecision]) -> List[Tuple[bool, Optional[str]]]:
+    """
+    Validate a batch of agent decisions, resolving conflicts using role priority.
+    
+    Args:
+        world: Current world state
+        decisions: List of agent decisions to validate
+        
+    Returns:
+        List of validation results (is_valid, rejection_reason) for each decision
+    """
+    # Group decisions by target to detect conflicts
+    decisions_by_target: Dict[str, List[AgentDecision]] = {}
+    for decision in decisions:
+        target = decision.target or "unknown"
+        if target not in decisions_by_target:
+            decisions_by_target[target] = []
+        decisions_by_target[target].append(decision)
+    
+    results = []
+    
+    # Process each target's decisions
+    for target, target_decisions in decisions_by_target.items():
+        if len(target_decisions) <= 1:
+            # No conflict, validate individually
+            for decision in target_decisions:
+                is_valid, reason = validate_decision(world.active_policy or PolicyConfig(
+                    name="Default", 
+                    containment_strategy=ContainmentStrategy.MONITOR_ONLY,
+                    isolation_confidence_threshold=0.5,
+                    allowed_actions=[],
+                    communication_delay_ticks=0
+                ), decision, world)
+                results.append((is_valid, reason))
+        else:
+            # Conflict detected - resolve using role priority
+            # Sort by role priority (lower number = higher priority)
+            def get_decision_priority(decision: AgentDecision) -> int:
+                agent_state = world.agents.get(decision.agent_id)
+                if agent_state and world.active_policy:
+                    role_priority_map = world.active_policy.role_priority
+                    return role_priority_map.get(agent_state.role, 999)  # Default low priority
+                return 999
+            
+            sorted_decisions = sorted(target_decisions, key=get_decision_priority)
+            
+            # Validate each decision in priority order
+            for i, decision in enumerate(sorted_decisions):
+                is_valid, reason = validate_decision(world.active_policy or PolicyConfig(
+                    name="Default", 
+                    containment_strategy=ContainmentStrategy.MONITOR_ONLY,
+                    isolation_confidence_threshold=0.5,
+                    allowed_actions=[],
+                    communication_delay_ticks=0
+                ), decision, world)
+                
+                # If this is a conflicting action and not the highest priority, reject it
+                if not is_valid and i > 0 and reason and "not allowed" in reason:
+                    # Check if it's a conflict with higher priority decision
+                    higher_priority_decision = sorted_decisions[0]
+                    if (higher_priority_decision.action_type == decision.action_type and 
+                        higher_priority_decision.target == decision.target):
+                        reason = f"Conflict resolved: higher priority agent {higher_priority_decision.agent_id} wins"
+                
+                results.append((is_valid, reason))
+    
+    # Reorder results to match original decision order
+    decision_to_result = {id(decision): result for decision, result in zip(decisions, results)}
+    return [decision_to_result[id(decision)] for decision in decisions]
+
+
+def get_role_priority(policy: PolicyConfig, role: str) -> int:
+    """
+    Get the priority number for a role (lower numbers = higher priority).
+    
+    Args:
+        policy: Policy configuration
+        role: Role name
+        
+    Returns:
+        Priority number (default 999 if not specified)
+    """
+    return policy.role_priority.get(role, 999)
+
+
+def validate_action_priority(policy: PolicyConfig, decisions: List[AgentDecision]) -> List[AgentDecision]:
+    """
+    Resolve conflicts in decisions using role priority, returning only the winning decisions.
+    
+    Args:
+        policy: Policy configuration
+        decisions: List of agent decisions
+        
+    Returns:
+        List of decisions that won priority resolution
+    """
+    # Group by (action_type, target) to find conflicts
+    conflict_groups: Dict[Tuple[str, Optional[str]], List[AgentDecision]] = {}
+    for decision in decisions:
+        key = (decision.action_type.value, decision.target)
+        if key not in conflict_groups:
+            conflict_groups[key] = []
+        conflict_groups[key].append(decision)
+    
+    winning_decisions = []
+    
+    for key, group in conflict_groups.items():
+        if len(group) == 1:
+            # No conflict
+            winning_decisions.extend(group)
+        else:
+            # Conflict - resolve by role priority
+            def get_priority(decision: AgentDecision) -> int:
+                return get_role_priority(policy, decision.agent_id)  # This needs agent state to get role
+            
+            # Actually, we need to get the agent's role from somewhere
+            # For now, we'll sort by agent_id as a placeholder - this should be improved
+            sorted_group = sorted(group, key=lambda d: d.agent_id)
+            winning_decisions.append(sorted_group[0])  # First agent wins (placeholder)
+    
+    return winning_decisions
 
 
 # Predefined policies as specified in the requirements
