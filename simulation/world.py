@@ -52,6 +52,14 @@ class DataStoreState:
 
 
 @dataclass
+class AgentState:
+    """Represents the state of an agent in the cyber simulation."""
+    agent_id: str = ""
+    role: str = ""  # e.g., "attacker", "security_engineer", "it_administrator", etc.
+    current_host: Optional[str] = None  # Host ID where this agent is currently operating
+
+
+@dataclass
 class WorldState:
     """Authoritative cyber WorldState for deterministic simulation."""
     tick: int = 0
@@ -97,25 +105,26 @@ class World:
         }
         self.state.events = []
         self.state.metrics_snapshot = {}
+        # Set the rng_seed from the world's seed
+        self.state.rng_seed = self.seed if self.seed is not None else 0
 
-    def step(self) -> float:
-        """Advance the world by one time step.
+    def step(self) -> int:
+        """Advance the world by one tick.
 
         Returns:
-            float: The new simulation time after the step
+            int: The new simulation tick after the step
         """
-        # Process all events scheduled for current time
-        processed_events = self.scheduler.process_events(self.state.time)
+        # Process all events scheduled for current tick
+        processed_events = self.scheduler.process_events(self.state.tick)
 
         # Apply event effects to world state
         for event in processed_events:
             self._apply_event(event)
 
-        # Advance time by one tick (can be made configurable)
-        self.state.time += 1.0
+        # Advance tick by one (can be made configurable)
         self.state.tick += 1
 
-        return self.state.time
+        return self.state.tick
 
     def apply_decisions(self, decisions: List[AgentDecision]) -> List[AgentActionTaken]:
         """Apply agent decisions to the world state, returning actions taken.
@@ -224,30 +233,56 @@ class World:
         Args:
             event (Event): The event to apply
         """
-        # Basic event application - can be extended for specific event types
-        if event.event_type == "entity_create":
-            entity_id = event.data.get("entity_id")
-            entity_data = event.data.get("data", {})
-            if entity_id:
-                self.state.entities[entity_id] = entity_data
-        elif event.event_type == "entity_update":
-            entity_id = event.data.get("entity_id")
+        # Cyber-specific event application
+        if event.event_type == "host_created":
+            host_data = event.data.get("host", {})
+            host_id = host_data.get("host_id")
+            if host_id:
+                self.state.hosts[host_id] = HostState(**host_data)
+        elif event.event_type == "host_updated":
+            host_id = event.data.get("host_id")
             updates = event.data.get("updates", {})
-            if entity_id and entity_id in self.state.entities:
-                self.state.entities[entity_id].update(updates)
-        elif event.event_type == "resource_add":
+            if host_id and host_id in self.state.hosts:
+                for key, value in updates.items():
+                    if hasattr(self.state.hosts[host_id], key):
+                        setattr(self.state.hosts[host_id], key, value)
+        elif event.event_type == "agent_created":
+            agent_data = event.data.get("agent", {})
+            agent_id = agent_data.get("agent_id")
+            if agent_id:
+                self.state.agents[agent_id] = AgentState(**agent_data)
+        elif event.event_type == "agent_updated":
+            agent_id = event.data.get("agent_id")
+            updates = event.data.get("updates", {})
+            if agent_id and agent_id in self.state.agents:
+                for key, value in updates.items():
+                    if hasattr(self.state.agents[agent_id], key):
+                        setattr(self.state.agents[agent_id], key, value)
+        elif event.event_type == "datastore_created":
+            store_data = event.data.get("datastore", {})
+            store_id = store_data.get("store_id")
+            if store_id:
+                self.state.data_stores[store_id] = DataStoreState(**store_data)
+        elif event.event_type == "datastore_updated":
+            store_id = event.data.get("store_id")
+            updates = event.data.get("updates", {})
+            if store_id and store_id in self.state.data_stores:
+                for key, value in updates.items():
+                    if hasattr(self.state.data_stores[store_id], key):
+                        setattr(self.state.data_stores[store_id], key, value)
+        elif event.event_type == "resource_added":
             resource_key = event.data.get("resource_key")
             resource_value = event.data.get("value")
             if resource_key is not None:
-                self.state.resources[resource_key] = resource_value
-        elif event.event_type == "resource_update":
+                self.state.resource_pool[resource_key] = resource_value
+        elif event.event_type == "resource_updated":
             resource_key = event.data.get("resource_key")
             update_value = event.data.get("update")
-            if resource_key is not None and resource_key in self.state.resources:
-                if isinstance(self.state.resources[resource_key], (int, float)) and isinstance(update_value, (int, float)):
-                    self.state.resources[resource_key] += update_value
+            if resource_key is not None and resource_key in self.state.resource_pool:
+                if isinstance(self.state.resource_pool[resource_key], (int, float)) and isinstance(update_value, (int, float)):
+                    self.state.resource_pool[resource_key] += update_value
                 else:
-                    self.state.resources[resource_key] = update_value
+                    self.state.resource_pool[resource_key] = update_value
 
     def get_state(self) -> Dict[str, Any]:
         """Get the current world state.
@@ -256,19 +291,26 @@ class World:
             dict: Current world state
         """
         return {
-            'time': self.state.time,
-            'entities': self.state.entities.copy(),
-            'resources': self.state.resources.copy(),
-            'metadata': self.state.metadata.copy()
+            'tick': self.state.tick,
+            'rng_seed': self.state.rng_seed,
+            'scenario_id': self.state.scenario_id,
+            'hosts': {host_id: host.__dict__ for host_id, host in self.state.hosts.items()},
+            'network': {host_id: connections.copy() for host_id, connections in self.state.network.items()},
+            'agents': {agent_id: agent.__dict__ for agent_id, agent in self.state.agents.items()},
+            'data_stores': {store_id: store.__dict__ for store_id, store in self.state.data_stores.items()},
+            'resource_pool': self.state.resource_pool.copy(),
+            'active_policy': self.state.active_policy,
+            'events': [event.__dict__ for event in self.state.events],
+            'metrics_snapshot': self.state.metrics_snapshot.copy()
         }
 
     def get_time(self) -> float:
         """Get the current simulation time.
 
         Returns:
-            float: Current simulation time
+            float: Current simulation time (based on tick)
         """
-        return self.state.time
+        return float(self.state.tick)
 
     def reset(self, seed: Optional[int] = None):
         """Reset the world to initial state.
@@ -289,32 +331,79 @@ class World:
     def add_entity(self, entity_id: str, entity_data: Dict[str, Any]):
         """Add an entity to the world.
 
+        In the cyber-specific architecture, this method maps entities to
+        appropriate cyber-specific structures based on the entity_data.
+
         Args:
             entity_id (str): Unique identifier for the entity
             entity_data (dict): Initial data for the entity
         """
-        self.state.entities[entity_id] = entity_data.copy()
+        # Determine entity type based on available fields
+        if 'host_id' in entity_data or 'hostname' in entity_data or 'os_type' in entity_data:
+            # Treat as host
+            if 'host_id' not in entity_data:
+                entity_data['host_id'] = entity_id
+            self.state.hosts[entity_id] = HostState(**entity_data)
+        elif 'agent_id' in entity_data or 'role' in entity_data or 'current_host' in entity_data:
+            # Treat as agent
+            if 'agent_id' not in entity_data:
+                entity_data['agent_id'] = entity_id
+            self.state.agents[entity_id] = AgentState(**entity_data)
+        elif 'store_id' in entity_data or 'name' in entity_data or 'store_type' in entity_data:
+            # Treat as data store
+            if 'store_id' not in entity_data:
+                entity_data['store_id'] = entity_id
+            self.state.data_stores[entity_id] = DataStoreState(**entity_data)
+        else:
+            # Default to treating as host for backward compatibility
+            if 'host_id' not in entity_data:
+                entity_data['host_id'] = entity_id
+            self.state.hosts[entity_id] = HostState(**entity_data)
 
     def update_entity(self, entity_id: str, updates: Dict[str, Any]):
         """Update an entity's data.
+
+        In the cyber-specific architecture, this method updates the
+        appropriate cyber-specific structure based on entity_id.
 
         Args:
             entity_id (str): Entity identifier
             updates (dict): Data to update
         """
-        if entity_id in self.state.entities:
-            self.state.entities[entity_id].update(updates)
+        # Check which structure contains this entity
+        if entity_id in self.state.hosts:
+            for key, value in updates.items():
+                if hasattr(self.state.hosts[entity_id], key):
+                    setattr(self.state.hosts[entity_id], key, value)
+        elif entity_id in self.state.agents:
+            for key, value in updates.items():
+                if hasattr(self.state.agents[entity_id], key):
+                    setattr(self.state.agents[entity_id], key, value)
+        elif entity_id in self.state.data_stores:
+            for key, value in updates.items():
+                if hasattr(self.state.data_stores[entity_id], key):
+                    setattr(self.state.data_stores[entity_id], key, value)
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
         """Get an entity's data.
 
+        In the cyber-specific architecture, this method returns data from
+        the appropriate cyber-specific structure.
+
         Args:
-            entity_id (str): Entity identifier
+            entity_id (str): Entity identifier (host_id)
 
         Returns:
             dict or None: Entity data if found
         """
-        return self.state.entities.get(entity_id)
+        if entity_id in self.state.hosts:
+            # Return as dict for backward compatibility with tests
+            return self.state.hosts[entity_id].__dict__
+        elif entity_id in self.state.agents:
+            return self.state.agents[entity_id].__dict__
+        elif entity_id in self.state.data_stores:
+            return self.state.data_stores[entity_id].__dict__
+        return None
 
     def add_resource(self, resource_key: str, value: Any):
         """Add or update a resource.
@@ -323,7 +412,7 @@ class World:
             resource_key (str): Resource identifier
             value (any): Resource value
         """
-        self.state.resources[resource_key] = value
+        self.state.resource_pool[resource_key] = value
 
     def get_resource(self, resource_key: str) -> Any:
         """Get a resource value.
@@ -334,7 +423,7 @@ class World:
         Returns:
             any: Resource value
         """
-        return self.state.resources.get(resource_key)
+        return self.state.resource_pool.get(resource_key)
 
     def random(self) -> float:
         """Get a random float [0, 1) using the world's random generator.
