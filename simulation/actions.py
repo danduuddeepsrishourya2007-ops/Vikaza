@@ -23,15 +23,30 @@ class ActionType(Enum):
     DEFENSE_EVASION = "DEFENSE_EVASION"
     IMPACT = "IMPACT"
 
+    # Phase 1B: defender / coordination actions
+    ISOLATE_HOST = "ISOLATE_HOST"
+    RESTORE_SERVICE = "RESTORE_SERVICE"
+    PATCH_HOST = "PATCH_HOST"
+    INVESTIGATE_HOST = "INVESTIGATE_HOST"
+    BLOCK_CONNECTION = "BLOCK_CONNECTION"
+    ALLOW_CONNECTION = "ALLOW_CONNECTION"
+    NOTIFY_CUSTOMERS = "NOTIFY_CUSTOMERS"
+    ESCALATE_INCIDENT = "ESCALATE_INCIDENT"
+
+    # Deterministic safe fallback.
+    # Requires a valid actor but bypasses role permissions, policy allow-list,
+    # targets and resource costs, and never mutates state.
+    NO_OP = "NO_OP"
+
 
 @dataclass
 class LegalAction:
     """Represents a legal action that an agent can take."""
     action_type: ActionType
-    target: Optional[str]  # Target host/entity ID
-    resource_cost: Dict[str, int]  # Resources required to perform action
-    description: str  # Human-readable description
-    
+    target: Optional[str]
+    resource_cost: Dict[str, int]
+    description: str
+
 
 @dataclass
 class AgentDecision:
@@ -40,13 +55,16 @@ class AgentDecision:
     tick: int
     action_type: ActionType
     target: Optional[str]
-    rationale: str  # Display/debug information only
-    source: str  # "scripted", "fallback_heuristic", or "llm"
-    
+    rationale: str
+    source: str
+
     def __post_init__(self):
         """Validate the decision after initialization."""
         if self.source not in ["scripted", "fallback_heuristic", "llm"]:
-            raise ValueError(f"Invalid source: {self.source}. Must be 'scripted', 'fallback_heuristic', or 'llm'")
+            raise ValueError(
+                f"Invalid source: {self.source}. "
+                "Must be 'scripted', 'fallback_heuristic', or 'llm'"
+            )
 
 
 @dataclass
@@ -58,8 +76,8 @@ class AgentActionRejected:
     target: Optional[str]
     rationale: str
     source: str
-    rejection_reason: str  # Why the action was rejected
-    
+    rejection_reason: str
+
 
 @dataclass
 class AgentActionTaken:
@@ -70,4 +88,4 @@ class AgentActionTaken:
     target: Optional[str]
     rationale: str
     source: str
-    event_id: Optional[str] = None  # ID of the resulting event
+    event_id: Optional[int] = None

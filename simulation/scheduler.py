@@ -7,6 +7,7 @@ responsible for mutating WorldState themselves.
 """
 
 import heapq
+
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -29,12 +30,21 @@ class Scheduler:
     """Deterministic tick-based scheduler."""
 
     def __init__(self) -> None:
-        self._event_queue: list[tuple[int, int, _ScheduledItem]] = []
+        self._event_queue: list[
+            tuple[int, int, _ScheduledItem]
+        ] = []
+
         self._sequence_count = 0
-        self._scheduled_events: dict[str, _ScheduledItem] = {}
+
+        self._scheduled_events: dict[
+            str,
+            _ScheduledItem,
+        ] = {}
 
     def _next_id(self) -> str:
-        schedule_id = f"event_{self._sequence_count}"
+        schedule_id = (
+            f"event_{self._sequence_count}"
+        )
         return schedule_id
 
     def schedule_event(
@@ -50,7 +60,9 @@ class Scheduler:
         """
 
         if event_time < 0:
-            raise ValueError("event_time must be non-negative")
+            raise ValueError(
+                "event_time must be non-negative"
+            )
 
         if event.tick != event_time:
             raise ValueError(
@@ -61,7 +73,9 @@ class Scheduler:
             event_id = self._next_id()
 
         if event_id in self._scheduled_events:
-            raise ValueError(f"Duplicate schedule ID: {event_id}")
+            raise ValueError(
+                f"Duplicate schedule ID: {event_id}"
+            )
 
         sequence = self._sequence_count
         self._sequence_count += 1
@@ -77,10 +91,16 @@ class Scheduler:
 
         heapq.heappush(
             self._event_queue,
-            (event_time, sequence, item),
+            (
+                event_time,
+                sequence,
+                item,
+            ),
         )
 
-        self._scheduled_events[event_id] = item
+        self._scheduled_events[
+            event_id
+        ] = item
 
         return event_id
 
@@ -94,19 +114,21 @@ class Scheduler:
         """
         Schedule an internal callback.
 
-        Callback work is deliberately not represented as an Event because
-        callbacks are execution mechanics, not authoritative simulation
-        history.
+        Callback work is deliberately not represented as an Event.
         """
 
         if event_time < 0:
-            raise ValueError("event_time must be non-negative")
+            raise ValueError(
+                "event_time must be non-negative"
+            )
 
         if event_id is None:
             event_id = self._next_id()
 
         if event_id in self._scheduled_events:
-            raise ValueError(f"Duplicate schedule ID: {event_id}")
+            raise ValueError(
+                f"Duplicate schedule ID: {event_id}"
+            )
 
         sequence = self._sequence_count
         self._sequence_count += 1
@@ -122,22 +144,29 @@ class Scheduler:
 
         heapq.heappush(
             self._event_queue,
-            (event_time, sequence, item),
+            (
+                event_time,
+                sequence,
+                item,
+            ),
         )
 
-        self._scheduled_events[event_id] = item
+        self._scheduled_events[
+            event_id
+        ] = item
 
         return event_id
 
-    def cancel_event(self, event_id: str) -> bool:
-        """
-        Cancel a scheduled item.
+    def cancel_event(
+        self,
+        event_id: str,
+    ) -> bool:
+        """Cancel a scheduled item."""
 
-        Cancellation removes the item from the tracking map. The heap is
-        rebuilt so cancelled work cannot later be processed.
-        """
-
-        item = self._scheduled_events.pop(event_id, None)
+        item = self._scheduled_events.pop(
+            event_id,
+            None,
+        )
 
         if item is None:
             return False
@@ -147,67 +176,136 @@ class Scheduler:
             for queued in self._event_queue
             if queued[2] is not item
         ]
-        heapq.heapify(self._event_queue)
+
+        heapq.heapify(
+            self._event_queue
+        )
 
         return True
 
-    def process_events(self, current_time: int) -> list[Event]:
+    def process_events(
+        self,
+        current_time: int,
+    ) -> list[Event]:
         """
         Process all scheduled authoritative Events up to current_time.
 
-        Callback tasks execute against the supplied world through
-        process_callbacks(); they are not returned as Events.
+        Callback tasks are left for process_callbacks().
         """
 
         processed: list[Event] = []
 
-        while self._event_queue and self._event_queue[0][0] <= current_time:
-            _, _, item = heapq.heappop(self._event_queue)
-            self._scheduled_events.pop(item.schedule_id, None)
+        deferred: list[
+            tuple[int, int, _ScheduledItem]
+        ] = []
+
+        while (
+            self._event_queue
+            and self._event_queue[0][0]
+            <= current_time
+        ):
+            entry = heapq.heappop(
+                self._event_queue
+            )
+
+            item = entry[2]
 
             if item.event is not None:
-                processed.append(item.event)
+                self._scheduled_events.pop(
+                    item.schedule_id,
+                    None,
+                )
+
+                processed.append(
+                    item.event
+                )
+
+            else:
+                deferred.append(entry)
+
+        for entry in deferred:
+            heapq.heappush(
+                self._event_queue,
+                entry,
+            )
 
         return processed
 
-    def process_callbacks(self, current_time: int, world: Any) -> int:
+    def process_callbacks(
+        self,
+        current_time: int,
+        world: Any,
+    ) -> int:
         """
         Execute scheduled callbacks up to current_time.
 
         Returns the number of callbacks executed.
-
-        Authoritative Events are left untouched by this method.
         """
 
-        ready_callbacks: list[_ScheduledItem] = []
-        remaining: list[tuple[int, int, _ScheduledItem]] = []
+        ready_callbacks: list[
+            _ScheduledItem
+        ] = []
+
+        remaining: list[
+            tuple[int, int, _ScheduledItem]
+        ] = []
 
         while self._event_queue:
-            tick, sequence, item = heapq.heappop(self._event_queue)
+            tick, sequence, item = (
+                heapq.heappop(
+                    self._event_queue
+                )
+            )
 
-            if tick <= current_time and item.callback is not None:
+            if (
+                tick <= current_time
+                and item.callback is not None
+            ):
                 ready_callbacks.append(item)
-                self._scheduled_events.pop(item.schedule_id, None)
+
+                self._scheduled_events.pop(
+                    item.schedule_id,
+                    None,
+                )
+
             else:
-                remaining.append((tick, sequence, item))
+                remaining.append(
+                    (
+                        tick,
+                        sequence,
+                        item,
+                    )
+                )
 
         for entry in remaining:
-            heapq.heappush(self._event_queue, entry)
+            heapq.heappush(
+                self._event_queue,
+                entry,
+            )
 
         for item in ready_callbacks:
-            item.callback(world, item.callback_data)
+            item.callback(
+                world,
+                item.callback_data,
+            )
 
         return len(ready_callbacks)
 
-    def get_upcoming_events(self, count: int = 10) -> list[Event]:
+    def get_upcoming_events(
+        self,
+        count: int = 10,
+    ) -> list[Event]:
         """Return upcoming authoritative Events without consuming them."""
 
         if count < 0:
-            raise ValueError("count must be non-negative")
+            raise ValueError(
+                "count must be non-negative"
+            )
 
         upcoming = [
             item
-            for _, _, item in sorted(self._event_queue)
+            for _, _, item
+            in sorted(self._event_queue)
             if item.event is not None
         ]
 
@@ -219,7 +317,6 @@ class Scheduler:
 
     def get_event_count(self) -> int:
         """Return the number of scheduled items."""
-
         return len(self._event_queue)
 
     def clear(self) -> None:
