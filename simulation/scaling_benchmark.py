@@ -68,6 +68,7 @@ def state_digest(world) -> str:
         "agents": state.agents,
         "data_stores": state.data_stores,
         "resource_pool": state.resource_pool,
+        "active_policy": state.active_policy,
         "events": state.events,
         "metrics_snapshot": state.metrics_snapshot,
         "next_event_id": state.next_event_id,

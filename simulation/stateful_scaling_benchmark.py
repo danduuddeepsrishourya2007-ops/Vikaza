@@ -22,8 +22,14 @@ def run_once(
     seed: int,
     ticks: int,
 ) -> dict[str, Any]:
-    if ticks < 1:
-        raise ValueError("ticks must be at least 1")
+    if not isinstance(ticks, int) or isinstance(ticks, bool) or ticks < 1:
+        raise ValueError("ticks must be a positive integer")
+    if not isinstance(agent_count, int) or isinstance(agent_count, bool) or agent_count < 2:
+        raise ValueError("agent_count must be an integer of at least 2")
+    if not isinstance(host_count, int) or isinstance(host_count, bool) or host_count < 3:
+        raise ValueError("host_count must be an integer of at least 3")
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise ValueError("seed must be an integer")
 
     world = build_scaling_world(agent_count, host_count, seed)
 
@@ -124,6 +130,26 @@ def run_once(
 
     remaining_analyst_hours = world.state.resource_pool["analyst_hours"]
 
+    # Benchmark integrity checks: fail loudly rather than emit a misleading
+    # report if engine behavior violates the workload's accounting contract.
+    expected_decisions = agent_count * ticks
+    if world.state.tick != ticks:
+        raise RuntimeError(
+            f"Expected final tick {ticks}, got {world.state.tick}"
+        )
+    if accepted_actions + len(rejection_events) != expected_decisions:
+        raise RuntimeError(
+            "Decision accounting mismatch: accepted plus rejected decisions "
+            f"must equal {expected_decisions}"
+        )
+    if remaining_analyst_hours < 0:
+        raise RuntimeError("Analyst-hour resource balance became negative")
+    if isolated_hosts + remaining_unisolated_compromised_hosts != host_count:
+        raise RuntimeError(
+            "Containment accounting mismatch: isolated and remaining "
+            "compromised hosts must equal the workload host count"
+        )
+
     return {
         "agents": agent_count,
         "hosts": host_count,
@@ -162,17 +188,37 @@ def run_benchmark(
     repeats: int,
     warmups: int,
 ) -> dict[str, Any]:
-    if ticks < 1 or repeats < 2 or warmups < 0:
-        raise ValueError(
-            "ticks must be positive, repeats at least 2, "
-            "and warmups non-negative"
-        )
-
+    if not isinstance(ticks, int) or isinstance(ticks, bool) or ticks < 1:
+        raise ValueError("ticks must be a positive integer")
+    if not isinstance(repeats, int) or isinstance(repeats, bool) or repeats < 2:
+        raise ValueError("repeats must be an integer of at least 2")
+    if not isinstance(warmups, int) or isinstance(warmups, bool) or warmups < 0:
+        raise ValueError("warmups must be a non-negative integer")
     if not sizes:
         raise ValueError("At least one workload size is required")
     if not seeds:
         raise ValueError("At least one seed is required")
 
+    normalized_sizes = []
+    for size in sizes:
+        if not isinstance(size, (tuple, list)) or len(size) != 2:
+            raise ValueError("Each workload size must be an (agents, hosts) pair")
+        agents, hosts = size
+        if (not isinstance(agents, int) or isinstance(agents, bool)
+                or not isinstance(hosts, int) or isinstance(hosts, bool)):
+            raise ValueError("Workload agent and host counts must be integers")
+        if agents < 2 or hosts < 3:
+            raise ValueError("Workloads require at least 2 agents and 3 hosts")
+        normalized_sizes.append((agents, hosts))
+    if len(set(normalized_sizes)) != len(normalized_sizes):
+        raise ValueError("Workload sizes must be unique")
+
+    if any(not isinstance(seed, int) or isinstance(seed, bool) for seed in seeds):
+        raise ValueError("seeds must contain integers")
+    if len(set(seeds)) != len(seeds):
+        raise ValueError("seeds must be unique")
+
+    sizes = normalized_sizes
     results = []
 
     for agents, hosts in sizes:

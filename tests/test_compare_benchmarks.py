@@ -122,3 +122,44 @@ def test_comparison_reports_non_deterministic_inputs():
 
     assert report["summary"]["all_noop_runs_deterministic"] is False
     assert report["summary"]["all_stateful_runs_deterministic"] is True
+
+
+@pytest.mark.parametrize("invalid_rate", [float("nan"), float("inf"), float("-inf"), True])
+def test_comparison_rejects_non_finite_or_boolean_throughput(invalid_rate):
+    noop = {
+        "results": [
+            make_result(
+                ticks_per_second=invalid_rate,
+                decisions_per_second=200,
+            )
+        ]
+    }
+    stateful = {
+        "results": [
+            make_result(ticks_per_second=50, decisions_per_second=100)
+        ]
+    }
+
+    with pytest.raises(ValueError, match="finite non-negative"):
+        compare_reports(noop, stateful)
+
+
+@pytest.mark.parametrize("invalid_agents", [2.5, True, "2"])
+def test_comparison_rejects_non_integer_workload_identifiers(invalid_agents):
+    noop_result = make_result(ticks_per_second=100, decisions_per_second=200)
+    stateful_result = make_result(ticks_per_second=50, decisions_per_second=100)
+    noop_result["agents"] = invalid_agents
+    stateful_result["agents"] = invalid_agents
+
+    with pytest.raises(ValueError, match="invalid agents"):
+        compare_reports({"results": [noop_result]}, {"results": [stateful_result]})
+
+
+def test_comparison_rejects_invalid_workload_dimensions():
+    noop_result = make_result(ticks_per_second=100, decisions_per_second=200)
+    stateful_result = make_result(ticks_per_second=50, decisions_per_second=100)
+    noop_result["hosts"] = 2
+    stateful_result["hosts"] = 2
+
+    with pytest.raises(ValueError, match="workload size"):
+        compare_reports({"results": [noop_result]}, {"results": [stateful_result]})

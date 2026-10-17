@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -20,17 +21,28 @@ def _index_results(
     indexed = {}
 
     for result in results:
-        try:
-            key = (
-                int(result["agents"]),
-                int(result["hosts"]),
-                int(result["seed"]),
-                int(result["ticks"]),
-            )
-        except (KeyError, TypeError, ValueError) as exc:
+        if not isinstance(result, dict):
+            raise ValueError(f"{label} results must contain objects")
+
+        identifiers = ("agents", "hosts", "seed", "ticks")
+        raw_identifiers = {}
+        for field in identifiers:
+            value = result.get(field)
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(
+                    f"{label} result has invalid {field}; expected an integer"
+                )
+            raw_identifiers[field] = value
+
+        if raw_identifiers["agents"] < 2 or raw_identifiers["hosts"] < 3:
             raise ValueError(
-                f"{label} result is missing valid workload identifiers"
-            ) from exc
+                f"{label} result has invalid workload size; agents must be >= 2 "
+                "and hosts must be >= 3"
+            )
+        if raw_identifiers["ticks"] < 1:
+            raise ValueError(f"{label} result ticks must be at least 1")
+
+        key = tuple(raw_identifiers[field] for field in identifiers)
 
         if key in indexed:
             raise ValueError(f"Duplicate {label} workload: {key}")
@@ -40,9 +52,15 @@ def _index_results(
             "median_decisions_per_second",
         ):
             value = result.get(field)
-            if not isinstance(value, (int, float)) or value < 0:
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+                or value < 0
+            ):
                 raise ValueError(
-                    f"{label} workload {key} has invalid {field}"
+                    f"{label} workload {key} has invalid {field}; "
+                    "expected a finite non-negative number"
                 )
 
         if not isinstance(result.get("deterministic"), bool):

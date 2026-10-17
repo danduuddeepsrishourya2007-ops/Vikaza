@@ -48,3 +48,12 @@ def test_benchmark_reports_determinism():
         result["median_decisions_per_second"] > 0
         for result in report["results"]
     )
+
+def test_state_digest_includes_active_policy_configuration():
+    from simulation.scaling_benchmark import state_digest
+
+    world = build_scaling_world(agent_count=2, host_count=3, seed=7)
+    original_digest = state_digest(world)
+    world.state.active_policy.name = "changed_policy"
+
+    assert state_digest(world) != original_digest
