@@ -6,9 +6,8 @@ Implements scripted agents for deterministic simulation in NEXUS.
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 
-from .base import BaseAgent, AgentState, AgentMemory
+from .base_agent import BaseAgent
 from ..actions import ActionType, AgentDecision
-from ..observe import observe
 from ..world import WorldState
 
 
@@ -76,13 +75,16 @@ class ScriptedAgent(BaseAgent):
         self.script_index += 1
 
         # Convert the action name into the closed ActionType enum.
+        action_name = script_action.get("action", "NO_OP")
+        # Accept legacy script labels while keeping the decision enum closed.
+        aliases = {
+            "SCAN_HOST": "NETWORK_SCAN",
+            "EXPLOIT_HOST": "VULNERABILITY_SCAN",
+            "EXFILTRATE_DATA": "DATA_EXFILTRATION",
+        }
+        action_name = aliases.get(action_name, action_name)
         try:
-            action_type = ActionType[
-                script_action.get(
-                    "action",
-                    "NO_OP",
-                )
-            ]
+            action_type = ActionType[action_name]
         except KeyError:
             action_type = ActionType.NO_OP
 
