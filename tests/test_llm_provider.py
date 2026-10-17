@@ -80,3 +80,70 @@ def test_provider_requires_configuration_and_positive_timeout():
         OpenAICompatibleProvider("", "model")
     with pytest.raises(ValueError, match="timeout_seconds"):
         OpenAICompatibleProvider("http://localhost/v1", "model", timeout_seconds=0)
+
+
+def test_quota_exhaustion_opens_circuit_and_prevents_repeated_requests():
+    calls = []
+
+    def exhausted_transport(*args):
+        calls.append(args[0])
+        raise ProviderError(
+            "LLM endpoint returned HTTP 429 (credit_balance_exhausted)",
+            category="quota_exhausted",
+            status_code=429,
+        )
+
+    primary = OpenAICompatibleProvider(
+        "https://api.openai.com/v1", "test-model", transport=exhausted_transport,
+    )
+    provider = FallbackProvider(primary, ScriptedDefensiveProvider())
+    world = configured_world()
+    view = observe(world, "security_engineer_1")
+
+    first = provider.decide(view)
+    second = provider.decide(view)
+    third = provider.decide(view)
+
+    assert first.source == second.source == third.source == "fallback_heuristic"
+    assert len(calls) == 1
+    assert primary.calls == 1
+    assert primary.failures == 1
+    assert provider.stats.fallback_decisions == 3
+    assert provider.stats.failed_decisions == 1
+    assert provider.stats.skipped_after_circuit_open == 2
+    assert provider.stats.circuit_open is True
+    assert provider.stats.last_error_category == "quota_exhausted"
+    assert provider.stats.last_error_status_code == 429
+
+
+def test_http_error_body_classifies_exhausted_quota_without_leaking_raw_message():
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    body = b'{"error":{"message":"private billing detail","type":"insufficient_quota","code":"credit_balance_exhausted"}}'
+    http_error = HTTPError(
+        "https://api.openai.com/v1/chat/completions", 429, "Too Many Requests", {}, BytesIO(body)
+    )
+
+    def failing_urlopen(*args, **kwargs):
+        raise http_error
+
+    # Exercise the production HTTP transport without making a network request.
+    import simulation.llm_provider as module
+    original_urlopen = module.urlopen
+    module.urlopen = failing_urlopen
+    try:
+        with pytest.raises(ProviderError) as caught:
+            OpenAICompatibleProvider._http_json(
+                "https://api.openai.com/v1/chat/completions",
+                {"Content-Type": "application/json"},
+                {"model": "test-model"},
+                1.0,
+            )
+    finally:
+        module.urlopen = original_urlopen
+
+    assert caught.value.category == "quota_exhausted"
+    assert caught.value.status_code == 429
+    assert "credit_balance_exhausted" in str(caught.value)
+    assert "private billing detail" not in str(caught.value)

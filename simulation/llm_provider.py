@@ -19,7 +19,55 @@ from .observations import AgentView
 
 
 class ProviderError(RuntimeError):
-    """Raised when the model endpoint response cannot produce a valid decision."""
+    """Sanitized provider failure with machine-readable diagnostics.
+
+    Error messages deliberately exclude response bodies, request headers, and
+    credentials so they are safe to include in experiment reports.
+    """
+
+    def __init__(self, message: str, *, category: str = "provider_error", status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.category = category
+        self.status_code = status_code
+
+
+def _http_error_details(exc: HTTPError) -> tuple[str, str]:
+    """Return a safe category and public message from an HTTP error response."""
+    code: str | None = None
+    try:
+        body = exc.read(64 * 1024).decode("utf-8", errors="replace")
+        parsed = json.loads(body)
+        error = parsed.get("error", {}) if isinstance(parsed, dict) else {}
+        if isinstance(error, dict):
+            raw_code = error.get("code")
+            raw_type = error.get("type")
+            if isinstance(raw_code, str):
+                code = raw_code.lower()
+            elif isinstance(raw_type, str):
+                code = raw_type.lower()
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        pass
+
+    if exc.code == 401:
+        category = "authentication_error"
+    elif exc.code == 403:
+        category = "permission_error"
+    elif exc.code == 429 and code in {"insufficient_quota", "credit_balance_exhausted"}:
+        category = "quota_exhausted"
+    elif exc.code == 429:
+        category = "rate_limited"
+    elif exc.code == 404:
+        category = "endpoint_or_model_not_found"
+    elif exc.code == 400:
+        category = "invalid_request"
+    elif exc.code >= 500:
+        category = "server_error"
+    else:
+        category = "http_error"
+
+    # Do not include the provider's raw body in exceptions or JSON reports.
+    suffix = f" ({code})" if code in {"insufficient_quota", "credit_balance_exhausted", "rate_limit_exceeded"} else ""
+    return category, f"LLM endpoint returned HTTP {exc.code}{suffix}"
 
 
 def _view_payload(view: AgentView) -> dict[str, Any]:
@@ -124,13 +172,17 @@ class OpenAICompatibleProvider:
             with urlopen(request, timeout=timeout) as response:
                 decoded = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
-            raise ProviderError(f"LLM endpoint returned HTTP {exc.code}") from exc
+            category, message = _http_error_details(exc)
+            raise ProviderError(message, category=category, status_code=exc.code) from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise ProviderError(f"LLM endpoint request failed: {type(exc).__name__}") from exc
+            category = "timeout" if isinstance(exc, TimeoutError) else "network_error"
+            raise ProviderError(
+                f"LLM endpoint request failed: {type(exc).__name__}", category=category
+            ) from exc
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ProviderError("LLM endpoint returned invalid JSON") from exc
+            raise ProviderError("LLM endpoint returned invalid JSON", category="invalid_response") from exc
         if not isinstance(decoded, dict):
-            raise ProviderError("LLM endpoint response must be a JSON object")
+            raise ProviderError("LLM endpoint response must be a JSON object", category="invalid_response")
         return decoded
 
     def decide(self, view: AgentView) -> AgentDecision:
@@ -158,29 +210,29 @@ class OpenAICompatibleProvider:
             response = self._transport(self.endpoint, headers, payload, self.timeout_seconds)
             choices = response.get("choices")
             if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-                raise ProviderError("LLM response has no choices[0]")
+                raise ProviderError("LLM response has no choices[0]", category="invalid_response")
             message = choices[0].get("message")
             if not isinstance(message, dict) or not isinstance(message.get("content"), str):
-                raise ProviderError("LLM response has no textual message content")
+                raise ProviderError("LLM response has no textual message content", category="invalid_response")
             try:
                 content = json.loads(message["content"])
             except json.JSONDecodeError as exc:
-                raise ProviderError("LLM decision content is not valid JSON") from exc
+                raise ProviderError("LLM decision content is not valid JSON", category="invalid_decision") from exc
             if not isinstance(content, dict):
-                raise ProviderError("LLM decision must be a JSON object")
+                raise ProviderError("LLM decision must be a JSON object", category="invalid_decision")
             if set(content) - {"action_type", "target", "rationale"}:
-                raise ProviderError("LLM decision contains unsupported fields")
+                raise ProviderError("LLM decision contains unsupported fields", category="invalid_decision")
             raw_action = content.get("action_type")
             try:
                 action = ActionType(raw_action)
             except (ValueError, TypeError) as exc:
-                raise ProviderError(f"LLM returned unknown action_type {raw_action!r}") from exc
+                raise ProviderError(f"LLM returned unknown action_type {raw_action!r}", category="invalid_decision") from exc
             target = content.get("target")
             rationale = content.get("rationale")
             if target is not None and (not isinstance(target, str) or not target.strip()):
-                raise ProviderError("LLM target must be a non-empty string or null")
+                raise ProviderError("LLM target must be a non-empty string or null", category="invalid_decision")
             if not isinstance(rationale, str):
-                raise ProviderError("LLM rationale must be a string")
+                raise ProviderError("LLM rationale must be a string", category="invalid_decision")
             # Bound model-supplied text before it enters the event log.
             return AgentDecision(
                 agent_id=view.agent_id,
@@ -195,7 +247,7 @@ class OpenAICompatibleProvider:
             raise
         except Exception as exc:
             self.failures += 1
-            raise ProviderError(f"LLM provider failed: {type(exc).__name__}") from exc
+            raise ProviderError(f"LLM provider failed: {type(exc).__name__}", category="provider_error") from exc
         finally:
             self.total_latency_seconds += perf_counter() - started
 
@@ -205,6 +257,10 @@ class ProviderStats:
     attempts: int = 0
     fallback_decisions: int = 0
     failed_decisions: int = 0
+    skipped_after_circuit_open: int = 0
+    circuit_open: bool = False
+    last_error_category: str | None = None
+    last_error_status_code: int | None = None
 
 
 class FallbackProvider:
@@ -215,6 +271,13 @@ class FallbackProvider:
     inference costs and unpredictable delays.
     """
 
+    # These failures will not resolve on the next tick without configuration or
+    # account changes. Stop making billable requests for the rest of this run.
+    _CIRCUIT_OPEN_CATEGORIES = {
+        "quota_exhausted", "authentication_error", "permission_error",
+        "rate_limited", "invalid_request", "endpoint_or_model_not_found",
+    }
+
     def __init__(self, primary, fallback=None) -> None:
         self.primary = primary
         self.fallback = fallback or ScriptedDefensiveProvider()
@@ -222,17 +285,29 @@ class FallbackProvider:
 
     def decide(self, view: AgentView) -> AgentDecision:
         self.stats.attempts += 1
+        if self.stats.circuit_open:
+            self.stats.skipped_after_circuit_open += 1
+            return self._fallback_decision(view, "circuit open: " + (self.stats.last_error_category or "provider error"))
         try:
             return self.primary.decide(view)
-        except Exception:
+        except Exception as exc:
             self.stats.failed_decisions += 1
-            decision = self.fallback.decide(view)
-            self.stats.fallback_decisions += 1
-            return AgentDecision(
-                agent_id=view.agent_id,
-                tick=view.tick,
-                action_type=decision.action_type,
-                target=decision.target,
-                rationale=("Fallback after provider failure: " + decision.rationale)[:500],
-                source="fallback_heuristic",
-            )
+            category = getattr(exc, "category", "provider_error")
+            self.stats.last_error_category = category
+            status_code = getattr(exc, "status_code", None)
+            self.stats.last_error_status_code = status_code if isinstance(status_code, int) else None
+            if category in self._CIRCUIT_OPEN_CATEGORIES:
+                self.stats.circuit_open = True
+            return self._fallback_decision(view, category)
+
+    def _fallback_decision(self, view: AgentView, reason: str) -> AgentDecision:
+        decision = self.fallback.decide(view)
+        self.stats.fallback_decisions += 1
+        return AgentDecision(
+            agent_id=view.agent_id,
+            tick=view.tick,
+            action_type=decision.action_type,
+            target=decision.target,
+            rationale=(f"Fallback after provider failure ({reason}): " + decision.rationale)[:500],
+            source="fallback_heuristic",
+        )
