@@ -1,0 +1,262 @@
+{
+  "all_outcomes_deterministic": true,
+  "benchmark_scope": "Fixed cyber-containment scenario. Runtime excludes replay verification and external LLM inference. No agent-count scaling claim is made.",
+  "benchmark_version": 1,
+  "configuration": {
+    "agent_count": 2,
+    "data_store_count": 1,
+    "host_count": 3,
+    "repeats_per_policy_seed": 5,
+    "seeds": [
+      7,
+      17,
+      42
+    ],
+    "ticks_per_run": 20,
+    "warmups_per_policy_seed": 1
+  },
+  "environment": {
+    "cpu_count_logical": 20,
+    "implementation": "CPython",
+    "machine": "AMD64",
+    "operating_system": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "python_version": "3.14.4"
+  },
+  "results": [
+    {
+      "agent_count": 2,
+      "data_store_count": 1,
+      "elapsed_seconds": {
+        "max": 0.0011532,
+        "mean": 0.00087944,
+        "median": 0.0008269,
+        "min": 0.0007788,
+        "p95": 0.0011532
+      },
+      "host_count": 3,
+      "median_runs_per_second": 1209.336,
+      "median_ticks_per_second": 24186.721,
+      "outcome_metrics": {
+        "actions_rejected": 0,
+        "events_recorded": 0,
+        "exfiltrated_stores": 0,
+        "final_compromised_host_fraction": 0.3333333333333333,
+        "final_compromised_hosts": 1,
+        "final_isolated_hosts": 0,
+        "final_services_running": 4,
+        "final_tick": 20,
+        "hosts_patched_events": 0,
+        "resource_pool_remaining": {
+          "analyst_hours": 20.0
+        },
+        "resource_used": {
+          "analyst_hours": 0.0
+        },
+        "total_services": 4
+      },
+      "outcome_sha256": "86a223c2ae94285c90c71f806d6c45dbe8696a81bbfb9a9585f16883435fbaa2",
+      "outcomes_deterministic_across_repeats": true,
+      "policy_id": "do_nothing_v1",
+      "repeat_count": 5,
+      "seed": 7,
+      "ticks_requested": 20,
+      "warmup_count": 1
+    },
+    {
+      "agent_count": 2,
+      "data_store_count": 1,
+      "elapsed_seconds": {
+        "max": 0.0013268,
+        "mean": 0.00110964,
+        "median": 0.0010102,
+        "min": 0.0009516,
+        "p95": 0.0013268
+      },
+      "host_count": 3,
+      "median_runs_per_second": 989.903,
+      "median_ticks_per_second": 19798.06,
+      "outcome_metrics": {
+        "actions_rejected": 0,
+        "events_recorded": 2,
+        "exfiltrated_stores": 0,
+        "final_compromised_host_fraction": 0.0,
+        "final_compromised_hosts": 0,
+        "final_isolated_hosts": 1,
+        "final_services_running": 4,
+        "final_tick": 20,
+        "hosts_patched_events": 1,
+        "resource_pool_remaining": {
+          "analyst_hours": 15.0
+        },
+        "resource_used": {
+          "analyst_hours": 5.0
+        },
+        "total_services": 4
+      },
+      "outcome_sha256": "ca41cfd2fc277041cae42b9dda3b0a1c0a5b48fadc1ac1515018a5fafbaf4317",
+      "outcomes_deterministic_across_repeats": true,
+      "policy_id": "scripted_defensive_v1",
+      "repeat_count": 5,
+      "seed": 7,
+      "ticks_requested": 20,
+      "warmup_count": 1
+    },
+    {
+      "agent_count": 2,
+      "data_store_count": 1,
+      "elapsed_seconds": {
+        "max": 0.0016266,
+        "mean": 0.00108152,
+        "median": 0.0009605,
+        "min": 0.0007841,
+        "p95": 0.0016266
+      },
+      "host_count": 3,
+      "median_runs_per_second": 1041.124,
+      "median_ticks_per_second": 20822.488,
+      "outcome_metrics": {
+        "actions_rejected": 0,
+        "events_recorded": 0,
+        "exfiltrated_stores": 0,
+        "final_compromised_host_fraction": 0.3333333333333333,
+        "final_compromised_hosts": 1,
+        "final_isolated_hosts": 0,
+        "final_services_running": 4,
+        "final_tick": 20,
+        "hosts_patched_events": 0,
+        "resource_pool_remaining": {
+          "analyst_hours": 20.0
+        },
+        "resource_used": {
+          "analyst_hours": 0.0
+        },
+        "total_services": 4
+      },
+      "outcome_sha256": "86a223c2ae94285c90c71f806d6c45dbe8696a81bbfb9a9585f16883435fbaa2",
+      "outcomes_deterministic_across_repeats": true,
+      "policy_id": "do_nothing_v1",
+      "repeat_count": 5,
+      "seed": 17,
+      "ticks_requested": 20,
+      "warmup_count": 1
+    },
+    {
+      "agent_count": 2,
+      "data_store_count": 1,
+      "elapsed_seconds": {
+        "max": 0.0008861,
+        "mean": 0.00084486,
+        "median": 0.0008351,
+        "min": 0.0008228,
+        "p95": 0.0008861
+      },
+      "host_count": 3,
+      "median_runs_per_second": 1197.461,
+      "median_ticks_per_second": 23949.228,
+      "outcome_metrics": {
+        "actions_rejected": 0,
+        "events_recorded": 2,
+        "exfiltrated_stores": 0,
+        "final_compromised_host_fraction": 0.0,
+        "final_compromised_hosts": 0,
+        "final_isolated_hosts": 1,
+        "final_services_running": 4,
+        "final_tick": 20,
+        "hosts_patched_events": 1,
+        "resource_pool_remaining": {
+          "analyst_hours": 15.0
+        },
+        "resource_used": {
+          "analyst_hours": 5.0
+        },
+        "total_services": 4
+      },
+      "outcome_sha256": "ca41cfd2fc277041cae42b9dda3b0a1c0a5b48fadc1ac1515018a5fafbaf4317",
+      "outcomes_deterministic_across_repeats": true,
+      "policy_id": "scripted_defensive_v1",
+      "repeat_count": 5,
+      "seed": 17,
+      "ticks_requested": 20,
+      "warmup_count": 1
+    },
+    {
+      "agent_count": 2,
+      "data_store_count": 1,
+      "elapsed_seconds": {
+        "max": 0.0008238,
+        "mean": 0.00079502,
+        "median": 0.0007929,
+        "min": 0.0007691,
+        "p95": 0.0008238
+      },
+      "host_count": 3,
+      "median_runs_per_second": 1261.193,
+      "median_ticks_per_second": 25223.861,
+      "outcome_metrics": {
+        "actions_rejected": 0,
+        "events_recorded": 0,
+        "exfiltrated_stores": 0,
+        "final_compromised_host_fraction": 0.3333333333333333,
+        "final_compromised_hosts": 1,
+        "final_isolated_hosts": 0,
+        "final_services_running": 4,
+        "final_tick": 20,
+        "hosts_patched_events": 0,
+        "resource_pool_remaining": {
+          "analyst_hours": 20.0
+        },
+        "resource_used": {
+          "analyst_hours": 0.0
+        },
+        "total_services": 4
+      },
+      "outcome_sha256": "86a223c2ae94285c90c71f806d6c45dbe8696a81bbfb9a9585f16883435fbaa2",
+      "outcomes_deterministic_across_repeats": true,
+      "policy_id": "do_nothing_v1",
+      "repeat_count": 5,
+      "seed": 42,
+      "ticks_requested": 20,
+      "warmup_count": 1
+    },
+    {
+      "agent_count": 2,
+      "data_store_count": 1,
+      "elapsed_seconds": {
+        "max": 0.0008706,
+        "mean": 0.00085308,
+        "median": 0.0008605,
+        "min": 0.0008261,
+        "p95": 0.0008706
+      },
+      "host_count": 3,
+      "median_runs_per_second": 1162.115,
+      "median_ticks_per_second": 23242.302,
+      "outcome_metrics": {
+        "actions_rejected": 0,
+        "events_recorded": 2,
+        "exfiltrated_stores": 0,
+        "final_compromised_host_fraction": 0.0,
+        "final_compromised_hosts": 0,
+        "final_isolated_hosts": 1,
+        "final_services_running": 4,
+        "final_tick": 20,
+        "hosts_patched_events": 1,
+        "resource_pool_remaining": {
+          "analyst_hours": 15.0
+        },
+        "resource_used": {
+          "analyst_hours": 5.0
+        },
+        "total_services": 4
+      },
+      "outcome_sha256": "ca41cfd2fc277041cae42b9dda3b0a1c0a5b48fadc1ac1515018a5fafbaf4317",
+      "outcomes_deterministic_across_repeats": true,
+      "policy_id": "scripted_defensive_v1",
+      "repeat_count": 5,
+      "seed": 42,
+      "ticks_requested": 20,
+      "warmup_count": 1
+    }
+  ]
+}

@@ -1,0 +1,486 @@
+{
+  "benchmark": "nexus_workload_scaling_v1",
+  "measurement": "Observation generation, decision application, and tick advancement; workload construction and external LLM inference excluded.",
+  "environment": {
+    "python": "3.14.4",
+    "implementation": "CPython",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel"
+  },
+  "settings": {
+    "sizes": [
+      {
+        "agents": 2,
+        "hosts": 3
+      },
+      {
+        "agents": 10,
+        "hosts": 10
+      },
+      {
+        "agents": 50,
+        "hosts": 50
+      }
+    ],
+    "seeds": [
+      7,
+      17,
+      42
+    ],
+    "ticks": 20,
+    "repeats": 3,
+    "warmups": 1
+  },
+  "results": [
+    {
+      "agents": 2,
+      "hosts": 3,
+      "seed": 7,
+      "ticks": 20,
+      "repeats": 3,
+      "deterministic": true,
+      "state_sha256": "d15490482090db9d6cb5adad3bc58765a873824b6c80e3778fbce78d00b719be",
+      "median_elapsed_seconds": 0.0008357000187970698,
+      "median_ticks_per_second": 23932.032487911827,
+      "median_decisions_per_second": 47864.064975823654,
+      "runs": [
+        {
+          "agents": 2,
+          "hosts": 3,
+          "seed": 7,
+          "ticks": 20,
+          "decisions": 40,
+          "elapsed_seconds": 0.0008357000187970698,
+          "ticks_per_second": 23932.032487911827,
+          "decisions_per_second": 47864.064975823654,
+          "final_tick": 20,
+          "state_sha256": "d15490482090db9d6cb5adad3bc58765a873824b6c80e3778fbce78d00b719be"
+        },
+        {
+          "agents": 2,
+          "hosts": 3,
+          "seed": 7,
+          "ticks": 20,
+          "decisions": 40,
+          "elapsed_seconds": 0.0008113000076264143,
+          "ticks_per_second": 24651.7931862384,
+          "decisions_per_second": 49303.5863724768,
+          "final_tick": 20,
+          "state_sha256": "d15490482090db9d6cb5adad3bc58765a873824b6c80e3778fbce78d00b719be"
+        },
+        {
+          "agents": 2,
+          "hosts": 3,
+          "seed": 7,
+          "ticks": 20,
+          "decisions": 40,
+          "elapsed_seconds": 0.0008584999886807054,
+          "ticks_per_second": 23296.447598950905,
+          "decisions_per_second": 46592.89519790181,
+          "final_tick": 20,
+          "state_sha256": "d15490482090db9d6cb5adad3bc58765a873824b6c80e3778fbce78d00b719be"
+        }
+      ]
+    },
+    {
+      "agents": 2,
+      "hosts": 3,
+      "seed": 17,
+      "ticks": 20,
+      "repeats": 3,
+      "deterministic": true,
+      "state_sha256": "ae594d343debc5fb168d0fa5ca3cca4c5480a6f590b4e2ab72e242ac1affa2b4",
+      "median_elapsed_seconds": 0.0008276000153273344,
+      "median_ticks_per_second": 24166.263448037214,
+      "median_decisions_per_second": 48332.52689607443,
+      "runs": [
+        {
+          "agents": 2,
+          "hosts": 3,
+          "seed": 17,
+          "ticks": 20,
+          "decisions": 40,
+          "elapsed_seconds": 0.0008251999970525503,
+          "ticks_per_second": 24236.548802031033,
+          "decisions_per_second": 48473.097604062066,
+          "final_tick": 20,
+          "state_sha256": "ae594d343debc5fb168d0fa5ca3cca4c5480a6f590b4e2ab72e242ac1affa2b4"
+        },
+        {
+          "agents": 2,
+          "hosts": 3,
+          "seed": 17,
+          "ticks": 20,
+          "decisions": 40,
+          "elapsed_seconds": 0.0008372000011149794,
+          "ticks_per_second": 23889.15429212146,
+          "decisions_per_second": 47778.30858424292,
+          "final_tick": 20,
+          "state_sha256": "ae594d343debc5fb168d0fa5ca3cca4c5480a6f590b4e2ab72e242ac1affa2b4"
+        },
+        {
+          "agents": 2,
+          "hosts": 3,
+          "seed": 17,
+          "ticks": 20,
+          "decisions": 40,
+          "elapsed_seconds": 0.0008276000153273344,
+          "ticks_per_second": 24166.263448037214,
+          "decisions_per_second": 48332.52689607443,
+          "final_tick": 20,
+          "state_sha256": "ae594d343debc5fb168d0fa5ca3cca4c5480a6f590b4e2ab72e242ac1affa2b4"
+        }
+      ]
+    },
+    {
+      "agents": 2,
+      "hosts": 3,
+      "seed": 42,
+      "ticks": 20,
+      "repeats": 3,
+      "deterministic": true,
+      "state_sha256": "4c620d5810f9050ace8d196af761ba3a7c64c63a938ef22d1108ced32b4805b4",
+      "median_elapsed_seconds": 0.0008277000160887837,
+      "median_ticks_per_second": 24163.343737152576,
+      "median_decisions_per_second": 48326.68747430515,
+      "runs": [
+        {
+          "agents": 2,
+          "hosts": 3,
+          "seed": 42,
+          "ticks": 20,
+          "decisions": 40,
+          "elapsed_seconds": 0.0008277000160887837,
+          "ticks_per_second": 24163.343737152576,
+          "decisions_per_second": 48326.68747430515,
+          "final_tick": 20,
+          "state_sha256": "4c620d5810f9050ace8d196af761ba3a7c64c63a938ef22d1108ced32b4805b4"
+        },
+        {
+          "agents": 2,
+          "hosts": 3,
+          "seed": 42,
+          "ticks": 20,
+          "decisions": 40,
+          "elapsed_seconds": 0.0008366999973077327,
+          "ticks_per_second": 23903.430219139984,
+          "decisions_per_second": 47806.86043827997,
+          "final_tick": 20,
+          "state_sha256": "4c620d5810f9050ace8d196af761ba3a7c64c63a938ef22d1108ced32b4805b4"
+        },
+        {
+          "agents": 2,
+          "hosts": 3,
+          "seed": 42,
+          "ticks": 20,
+          "decisions": 40,
+          "elapsed_seconds": 0.0008129999914672226,
+          "ticks_per_second": 24600.246260649972,
+          "decisions_per_second": 49200.492521299944,
+          "final_tick": 20,
+          "state_sha256": "4c620d5810f9050ace8d196af761ba3a7c64c63a938ef22d1108ced32b4805b4"
+        }
+      ]
+    },
+    {
+      "agents": 10,
+      "hosts": 10,
+      "seed": 7,
+      "ticks": 20,
+      "repeats": 3,
+      "deterministic": true,
+      "state_sha256": "27b25124989804ecfa039b8dd94c4fe685bd08c161012989c46f23a65689b96e",
+      "median_elapsed_seconds": 0.0077071999839972705,
+      "median_ticks_per_second": 2594.976131607679,
+      "median_decisions_per_second": 25949.761316076787,
+      "runs": [
+        {
+          "agents": 10,
+          "hosts": 10,
+          "seed": 7,
+          "ticks": 20,
+          "decisions": 200,
+          "elapsed_seconds": 0.0077071999839972705,
+          "ticks_per_second": 2594.976131607679,
+          "decisions_per_second": 25949.761316076787,
+          "final_tick": 20,
+          "state_sha256": "27b25124989804ecfa039b8dd94c4fe685bd08c161012989c46f23a65689b96e"
+        },
+        {
+          "agents": 10,
+          "hosts": 10,
+          "seed": 7,
+          "ticks": 20,
+          "decisions": 200,
+          "elapsed_seconds": 0.007733199978247285,
+          "ticks_per_second": 2586.251494369471,
+          "decisions_per_second": 25862.514943694707,
+          "final_tick": 20,
+          "state_sha256": "27b25124989804ecfa039b8dd94c4fe685bd08c161012989c46f23a65689b96e"
+        },
+        {
+          "agents": 10,
+          "hosts": 10,
+          "seed": 7,
+          "ticks": 20,
+          "decisions": 200,
+          "elapsed_seconds": 0.007683500007260591,
+          "ticks_per_second": 2602.980410112686,
+          "decisions_per_second": 26029.80410112686,
+          "final_tick": 20,
+          "state_sha256": "27b25124989804ecfa039b8dd94c4fe685bd08c161012989c46f23a65689b96e"
+        }
+      ]
+    },
+    {
+      "agents": 10,
+      "hosts": 10,
+      "seed": 17,
+      "ticks": 20,
+      "repeats": 3,
+      "deterministic": true,
+      "state_sha256": "bcba75c359c6fb46d249d75ba76ff0959f26b96d8ed71330314957446a2a93a4",
+      "median_elapsed_seconds": 0.007663500000489876,
+      "median_ticks_per_second": 2609.773601973189,
+      "median_decisions_per_second": 26097.736019731892,
+      "runs": [
+        {
+          "agents": 10,
+          "hosts": 10,
+          "seed": 17,
+          "ticks": 20,
+          "decisions": 200,
+          "elapsed_seconds": 0.007835299998987466,
+          "ticks_per_second": 2552.550636553105,
+          "decisions_per_second": 25525.50636553105,
+          "final_tick": 20,
+          "state_sha256": "bcba75c359c6fb46d249d75ba76ff0959f26b96d8ed71330314957446a2a93a4"
+        },
+        {
+          "agents": 10,
+          "hosts": 10,
+          "seed": 17,
+          "ticks": 20,
+          "decisions": 200,
+          "elapsed_seconds": 0.007663500000489876,
+          "ticks_per_second": 2609.773601973189,
+          "decisions_per_second": 26097.736019731892,
+          "final_tick": 20,
+          "state_sha256": "bcba75c359c6fb46d249d75ba76ff0959f26b96d8ed71330314957446a2a93a4"
+        },
+        {
+          "agents": 10,
+          "hosts": 10,
+          "seed": 17,
+          "ticks": 20,
+          "decisions": 200,
+          "elapsed_seconds": 0.0076320999942254275,
+          "ticks_per_second": 2620.5107395254686,
+          "decisions_per_second": 26205.107395254687,
+          "final_tick": 20,
+          "state_sha256": "bcba75c359c6fb46d249d75ba76ff0959f26b96d8ed71330314957446a2a93a4"
+        }
+      ]
+    },
+    {
+      "agents": 10,
+      "hosts": 10,
+      "seed": 42,
+      "ticks": 20,
+      "repeats": 3,
+      "deterministic": true,
+      "state_sha256": "1ced85986db6875bffa812e4d15466d00b973c6e89e392f7a32e4a4ab3c3c267",
+      "median_elapsed_seconds": 0.007607200008351356,
+      "median_ticks_per_second": 2629.0882293148,
+      "median_decisions_per_second": 26290.882293148003,
+      "runs": [
+        {
+          "agents": 10,
+          "hosts": 10,
+          "seed": 42,
+          "ticks": 20,
+          "decisions": 200,
+          "elapsed_seconds": 0.007607200008351356,
+          "ticks_per_second": 2629.0882293148,
+          "decisions_per_second": 26290.882293148003,
+          "final_tick": 20,
+          "state_sha256": "1ced85986db6875bffa812e4d15466d00b973c6e89e392f7a32e4a4ab3c3c267"
+        },
+        {
+          "agents": 10,
+          "hosts": 10,
+          "seed": 42,
+          "ticks": 20,
+          "decisions": 200,
+          "elapsed_seconds": 0.007941999996546656,
+          "ticks_per_second": 2518.257366997785,
+          "decisions_per_second": 25182.57366997785,
+          "final_tick": 20,
+          "state_sha256": "1ced85986db6875bffa812e4d15466d00b973c6e89e392f7a32e4a4ab3c3c267"
+        },
+        {
+          "agents": 10,
+          "hosts": 10,
+          "seed": 42,
+          "ticks": 20,
+          "decisions": 200,
+          "elapsed_seconds": 0.007570399990072474,
+          "ticks_per_second": 2641.868332746911,
+          "decisions_per_second": 26418.683327469113,
+          "final_tick": 20,
+          "state_sha256": "1ced85986db6875bffa812e4d15466d00b973c6e89e392f7a32e4a4ab3c3c267"
+        }
+      ]
+    },
+    {
+      "agents": 50,
+      "hosts": 50,
+      "seed": 7,
+      "ticks": 20,
+      "repeats": 3,
+      "deterministic": true,
+      "state_sha256": "a39eb895280a61b5f6df0387508c812d9722df1740713aa3e4b9f4f6dd07c083",
+      "median_elapsed_seconds": 0.1592739000043366,
+      "median_ticks_per_second": 125.56985167975074,
+      "median_decisions_per_second": 6278.492583987538,
+      "runs": [
+        {
+          "agents": 50,
+          "hosts": 50,
+          "seed": 7,
+          "ticks": 20,
+          "decisions": 1000,
+          "elapsed_seconds": 0.16575980000197887,
+          "ticks_per_second": 120.65651623470369,
+          "decisions_per_second": 6032.825811735184,
+          "final_tick": 20,
+          "state_sha256": "a39eb895280a61b5f6df0387508c812d9722df1740713aa3e4b9f4f6dd07c083"
+        },
+        {
+          "agents": 50,
+          "hosts": 50,
+          "seed": 7,
+          "ticks": 20,
+          "decisions": 1000,
+          "elapsed_seconds": 0.1592739000043366,
+          "ticks_per_second": 125.56985167975074,
+          "decisions_per_second": 6278.492583987538,
+          "final_tick": 20,
+          "state_sha256": "a39eb895280a61b5f6df0387508c812d9722df1740713aa3e4b9f4f6dd07c083"
+        },
+        {
+          "agents": 50,
+          "hosts": 50,
+          "seed": 7,
+          "ticks": 20,
+          "decisions": 1000,
+          "elapsed_seconds": 0.15808980001020245,
+          "ticks_per_second": 126.51037574030256,
+          "decisions_per_second": 6325.5187870151285,
+          "final_tick": 20,
+          "state_sha256": "a39eb895280a61b5f6df0387508c812d9722df1740713aa3e4b9f4f6dd07c083"
+        }
+      ]
+    },
+    {
+      "agents": 50,
+      "hosts": 50,
+      "seed": 17,
+      "ticks": 20,
+      "repeats": 3,
+      "deterministic": true,
+      "state_sha256": "eeb5e5655c665348d0a4d97f78eee8caeb9a9b26a6583462e729782a5cad7c54",
+      "median_elapsed_seconds": 0.1507607000239659,
+      "median_ticks_per_second": 132.660567354892,
+      "median_decisions_per_second": 6633.0283677446005,
+      "runs": [
+        {
+          "agents": 50,
+          "hosts": 50,
+          "seed": 17,
+          "ticks": 20,
+          "decisions": 1000,
+          "elapsed_seconds": 0.1507607000239659,
+          "ticks_per_second": 132.660567354892,
+          "decisions_per_second": 6633.0283677446005,
+          "final_tick": 20,
+          "state_sha256": "eeb5e5655c665348d0a4d97f78eee8caeb9a9b26a6583462e729782a5cad7c54"
+        },
+        {
+          "agents": 50,
+          "hosts": 50,
+          "seed": 17,
+          "ticks": 20,
+          "decisions": 1000,
+          "elapsed_seconds": 0.16356699998141266,
+          "ticks_per_second": 122.27405284851314,
+          "decisions_per_second": 6113.702642425657,
+          "final_tick": 20,
+          "state_sha256": "eeb5e5655c665348d0a4d97f78eee8caeb9a9b26a6583462e729782a5cad7c54"
+        },
+        {
+          "agents": 50,
+          "hosts": 50,
+          "seed": 17,
+          "ticks": 20,
+          "decisions": 1000,
+          "elapsed_seconds": 0.1507596999872476,
+          "ticks_per_second": 132.66144733434567,
+          "decisions_per_second": 6633.072366717283,
+          "final_tick": 20,
+          "state_sha256": "eeb5e5655c665348d0a4d97f78eee8caeb9a9b26a6583462e729782a5cad7c54"
+        }
+      ]
+    },
+    {
+      "agents": 50,
+      "hosts": 50,
+      "seed": 42,
+      "ticks": 20,
+      "repeats": 3,
+      "deterministic": true,
+      "state_sha256": "b0314bb6d22205aeb0c9b591b23bae2363655979c6bfde0ceb72afea8e9e4077",
+      "median_elapsed_seconds": 0.153777400002582,
+      "median_ticks_per_second": 130.05812297297385,
+      "median_decisions_per_second": 6502.906148648693,
+      "runs": [
+        {
+          "agents": 50,
+          "hosts": 50,
+          "seed": 42,
+          "ticks": 20,
+          "decisions": 1000,
+          "elapsed_seconds": 0.15223919998970814,
+          "ticks_per_second": 131.37220900630103,
+          "decisions_per_second": 6568.610450315052,
+          "final_tick": 20,
+          "state_sha256": "b0314bb6d22205aeb0c9b591b23bae2363655979c6bfde0ceb72afea8e9e4077"
+        },
+        {
+          "agents": 50,
+          "hosts": 50,
+          "seed": 42,
+          "ticks": 20,
+          "decisions": 1000,
+          "elapsed_seconds": 0.15583379997406155,
+          "ticks_per_second": 128.3418616714024,
+          "decisions_per_second": 6417.09308357012,
+          "final_tick": 20,
+          "state_sha256": "b0314bb6d22205aeb0c9b591b23bae2363655979c6bfde0ceb72afea8e9e4077"
+        },
+        {
+          "agents": 50,
+          "hosts": 50,
+          "seed": 42,
+          "ticks": 20,
+          "decisions": 1000,
+          "elapsed_seconds": 0.153777400002582,
+          "ticks_per_second": 130.05812297297385,
+          "decisions_per_second": 6502.906148648693,
+          "final_tick": 20,
+          "state_sha256": "b0314bb6d22205aeb0c9b591b23bae2363655979c6bfde0ceb72afea8e9e4077"
+        }
+      ]
+    }
+  ]
+}

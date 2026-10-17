@@ -1,53 +1,101 @@
+
 """Comparable seeded experiments for baseline and model-backed decision providers."""
 from __future__ import annotations
 
 from typing import Any, Callable
 
-from scenarios.cyber_containment import SCENARIO_ID, build_initial_world, policy_config
+from scenarios.cyber_containment import (
+    SCENARIO_ID,
+    build_initial_world,
+    policy_config,
+)
 from simulation.baselines import DoNothingProvider, ScriptedDefensiveProvider
+from simulation.evaluation import summarize_world
 from simulation.policy import ContainmentStrategy
 from simulation.replay import run_and_record, replay_trace
-from simulation.evaluation import summarize_world
 
 
 def configured_world(seed: int):
+    """Build a fresh world with the fixed experiment policy."""
     world = build_initial_world(seed)
-    world.state.active_policy = policy_config("nexus_experiment", ContainmentStrategy.IMMEDIATE)
+    world.state.active_policy = policy_config(
+        "nexus_experiment",
+        ContainmentStrategy.IMMEDIATE,
+    )
     return world
 
 
-def evaluate_provider(provider, policy_id: str, seed: int = 7, max_ticks: int = 5,
-                      verify_replay: bool = True) -> dict[str, Any]:
+def evaluate_provider(
+    provider,
+    policy_id: str,
+    seed: int = 7,
+    max_ticks: int = 5,
+    verify_replay: bool = True,
+) -> dict[str, Any]:
     """Run one provider with a fixed seed and return trace plus measured outcomes."""
     if not isinstance(policy_id, str) or not policy_id.strip():
         raise ValueError("policy_id must be a non-empty string")
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ValueError("seed must be an integer")
-    if not isinstance(max_ticks, int) or isinstance(max_ticks, bool) or max_ticks < 1:
+    if (
+        not isinstance(max_ticks, int)
+        or isinstance(max_ticks, bool)
+        or max_ticks < 1
+    ):
         raise ValueError("max_ticks must be a positive integer")
+    if not isinstance(verify_replay, bool):
+        raise ValueError("verify_replay must be a boolean")
+
+    # Keep a separate initial world. The simulated world is mutated during the
+    # run, whereas the initial world remains the authoritative initial snapshot.
     world = configured_world(seed)
+    initial_world = configured_world(seed)
     initial_resources = dict(world.state.resource_pool)
-    trace = run_and_record(world, provider, policy_id, max_ticks=max_ticks)
+
+    trace = run_and_record(
+        world,
+        provider,
+        policy_id,
+        max_ticks=max_ticks,
+    )
+
     if verify_replay:
         final_world = replay_trace(trace.to_json(), configured_world)
     else:
         final_world = world
-    decision_sources = {"llm": 0, "scripted": 0, "fallback_heuristic": 0}
+
+    decision_sources = {
+        "llm": 0,
+        "scripted": 0,
+        "fallback_heuristic": 0,
+    }
     fallback_reasons: dict[str, int] = {}
+
     for tick_decisions in trace.decisions_by_tick:
         for decision in tick_decisions:
             source = decision.get("source")
             if source in decision_sources:
                 decision_sources[source] += 1
+
             if source == "fallback_heuristic":
                 reason = decision.get("failure_reason") or "unspecified"
-                fallback_reasons[reason] = fallback_reasons.get(reason, 0) + 1
+                fallback_reasons[reason] = (
+                    fallback_reasons.get(reason, 0) + 1
+                )
+
     return {
         "policy_id": policy_id,
         "scenario_id": SCENARIO_ID,
         "seed": seed,
         "max_ticks": max_ticks,
-        "metrics": summarize_world(final_world, initial_resources),
+        "metrics": summarize_world(
+            final_world,
+            initial_resources,
+            initial_world=initial_world,
+            decisions_proposed=sum(
+                len(row) for row in trace.decisions_by_tick
+            ),
+        ),
         "replay_verified": verify_replay,
         "trace": trace.to_dict(),
         "provider_stats": _provider_stats(provider),
@@ -58,52 +106,219 @@ def evaluate_provider(provider, policy_id: str, seed: int = 7, max_ticks: int = 
     }
 
 
-def compare_providers(providers: list[tuple[str, Callable[[], Any]]], seeds: list[int],
-                      max_ticks: int = 5) -> dict[str, Any]:
-    """Evaluate each provider on every seed, constructing a fresh provider each run."""
+def compare_providers(
+    providers: list[tuple[str, Callable[[], Any]]],
+    seeds: list[int],
+    max_ticks: int = 5,
+) -> dict[str, Any]:
+    """Evaluate every provider on every seed using a fresh provider per run."""
     if not providers:
         raise ValueError("at least one provider is required")
     if not seeds:
         raise ValueError("at least one seed is required")
-    if not isinstance(max_ticks, int) or isinstance(max_ticks, bool) or max_ticks < 1:
+    if (
+        not isinstance(max_ticks, int)
+        or isinstance(max_ticks, bool)
+        or max_ticks < 1
+    ):
         raise ValueError("max_ticks must be a positive integer")
-    if any(not isinstance(seed, int) or isinstance(seed, bool) for seed in seeds):
+    if any(
+        not isinstance(seed, int) or isinstance(seed, bool)
+        for seed in seeds
+    ):
         raise ValueError("all seeds must be integers")
-    if any(not isinstance(policy_id, str) or not policy_id.strip() or not callable(factory) for policy_id, factory in providers):
-        raise ValueError("each provider must have a non-empty policy_id and callable factory")
+    if any(
+        not isinstance(policy_id, str)
+        or not policy_id.strip()
+        or not callable(factory)
+        for policy_id, factory in providers
+    ):
+        raise ValueError(
+            "each provider must have a non-empty policy_id "
+            "and callable factory"
+        )
     if len(set(seeds)) != len(seeds):
         raise ValueError("seeds must be unique")
+
+    policy_ids = [policy_id for policy_id, _ in providers]
+    if len(set(policy_ids)) != len(policy_ids):
+        raise ValueError("provider policy_ids must be unique")
+
     runs = []
     for seed in seeds:
         for policy_id, factory in providers:
-            runs.append(evaluate_provider(factory(), policy_id, seed, max_ticks))
+            runs.append(
+                evaluate_provider(
+                    factory(),
+                    policy_id,
+                    seed,
+                    max_ticks,
+                )
+            )
+
     grouped: dict[str, dict[str, Any]] = {}
     for run in runs:
-        row = grouped.setdefault(run["policy_id"], {"run_count": 0, "metrics": {}})
+        row = grouped.setdefault(
+            run["policy_id"],
+            {"run_count": 0, "metrics": {}},
+        )
         row["run_count"] += 1
+
         for key, value in run["metrics"].items():
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 row["metrics"].setdefault(key, []).append(value)
-    summaries = {}
+
+    summaries: dict[str, dict[str, Any]] = {}
     for policy_id, row in grouped.items():
+        policy_runs = [
+            run for run in runs
+            if run["policy_id"] == policy_id
+        ]
+        containment_runs = [
+            run for run in policy_runs
+            if run["metrics"].get("containment_achieved") is True
+        ]
+        containment_times = [
+            run["metrics"]["time_to_containment_ticks"]
+            for run in containment_runs
+            if isinstance(
+                run["metrics"].get("time_to_containment_ticks"),
+                (int, float),
+            )
+            and not isinstance(
+                run["metrics"].get("time_to_containment_ticks"),
+                bool,
+            )
+        ]
+
         summaries[policy_id] = {
             "run_count": row["run_count"],
+            "containment_success_rate": round(
+                len(containment_runs) / len(policy_runs),
+                4,
+            ),
+            "contained_run_count": len(containment_runs),
+            "mean_time_to_containment_ticks_when_achieved": (
+                round(
+                    sum(containment_times) / len(containment_times),
+                    4,
+                )
+                if containment_times
+                else None
+            ),
             "mean_metrics": {
                 key: round(sum(values) / len(values), 4)
-                for key, values in sorted(row["metrics"].items()) if values
+                for key, values in sorted(row["metrics"].items())
+                if values
             },
         }
+
+    paired_deltas: dict[str, dict[str, Any]] = {}
+    baseline_id = DoNothingProvider.policy_id
+    baseline_by_seed = {
+        run["seed"]: run["metrics"]
+        for run in runs
+        if run["policy_id"] == baseline_id
+    }
+
+    lower_is_better = {
+        "final_compromised_hosts",
+        "final_compromised_host_fraction",
+        "time_to_containment_ticks",
+        "data_exfiltrated_gb",
+        "exfiltrated_stores",
+        "final_services_down",
+        "service_down_events",
+        "analyst_hours_used",
+        "actions_rejected",
+    }
+
+    for policy_id in summaries:
+        if policy_id == baseline_id:
+            continue
+
+        comparisons = []
+        containment_time_eligible_pairs = 0
+        containment_time_excluded_pairs = 0
+
+        for run in runs:
+            if (
+                run["policy_id"] != policy_id
+                or run["seed"] not in baseline_by_seed
+            ):
+                continue
+
+            candidate_metrics = run["metrics"]
+            baseline_metrics = baseline_by_seed[run["seed"]]
+            deltas: dict[str, float] = {}
+
+            for key, value in candidate_metrics.items():
+                base_value = baseline_metrics.get(key)
+
+                if key == "time_to_containment_ticks":
+                    both_contained = (
+                        candidate_metrics.get("containment_achieved") is True
+                        and baseline_metrics.get("containment_achieved") is True
+                        and isinstance(value, (int, float))
+                        and not isinstance(value, bool)
+                        and isinstance(base_value, (int, float))
+                        and not isinstance(base_value, bool)
+                    )
+                    if both_contained:
+                        deltas[key] = round(value - base_value, 4)
+                        containment_time_eligible_pairs += 1
+                    else:
+                        containment_time_excluded_pairs += 1
+                    continue
+
+                if (
+                    isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    and isinstance(base_value, (int, float))
+                    and not isinstance(base_value, bool)
+                ):
+                    deltas[key] = round(value - base_value, 4)
+
+            comparisons.append({
+                "seed": run["seed"],
+                "delta_vs_do_nothing": deltas,
+            })
+
+        paired_deltas[policy_id] = {
+            "baseline_policy_id": baseline_id,
+            "interpretation": {
+                key: (
+                    "negative is improvement"
+                    if key in lower_is_better
+                    else "inspect raw metric"
+                )
+                for key in sorted(lower_is_better)
+            },
+            "containment_time_pairing": {
+                "eligible_pairs": containment_time_eligible_pairs,
+                "excluded_pairs": containment_time_excluded_pairs,
+                "rule": (
+                    "A containment-time delta is included only when both "
+                    "the candidate and do-nothing baseline achieved "
+                    "containment and both times are numeric."
+                ),
+            },
+            "per_seed": comparisons,
+        }
+
     return {
-        "report_version": 1,
+        "report_version": 2,
         "scenario_id": SCENARIO_ID,
         "seeds": list(seeds),
         "max_ticks": max_ticks,
         "summaries": summaries,
+        "paired_deltas_vs_do_nothing": paired_deltas,
         "runs": runs,
     }
 
 
 def baseline_provider_factories():
+    """Return the standard baseline providers as fresh-instance factories."""
     return [
         (DoNothingProvider.policy_id, DoNothingProvider),
         (ScriptedDefensiveProvider.policy_id, ScriptedDefensiveProvider),
@@ -111,16 +326,93 @@ def baseline_provider_factories():
 
 
 def _provider_stats(provider) -> dict[str, Any] | None:
-    """Expose safe numeric counters without leaking endpoint URLs or credentials."""
+    """Expose safe numeric counters without leaking URLs or credentials."""
     result: dict[str, Any] = {}
+
     stats = getattr(provider, "stats", None)
     if stats is not None and hasattr(stats, "__dict__"):
         result["wrapper"] = dict(vars(stats))
+
     primary = getattr(provider, "primary", None)
     if primary is not None:
         result["primary"] = {
             key: getattr(primary, key)
             for key in ("calls", "failures", "total_latency_seconds")
             if isinstance(getattr(primary, key, None), (int, float))
+            and not isinstance(getattr(primary, key, None), bool)
         }
+
     return result or None
+
+
+def evaluate_baselines(
+    seed: int = 7,
+    max_ticks: int = 5,
+) -> dict[str, Any]:
+    """Run both baselines from equivalent initial conditions and return traces."""
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise ValueError("seed must be an integer")
+    if (
+        not isinstance(max_ticks, int)
+        or isinstance(max_ticks, bool)
+        or max_ticks < 1
+    ):
+        raise ValueError("max_ticks must be a positive integer")
+
+    providers = [
+        (DoNothingProvider.policy_id, DoNothingProvider()),
+        (ScriptedDefensiveProvider.policy_id, ScriptedDefensiveProvider()),
+    ]
+    results = []
+    initial_host_ids = sorted(build_evaluation_world(seed).state.hosts)
+
+    for policy_id, provider in providers:
+        world = build_evaluation_world(seed)
+        initial_resources = dict(world.state.resource_pool)
+        initial_world = build_evaluation_world(seed)
+
+        trace = run_and_record(
+            world,
+            provider,
+            policy_id,
+            max_ticks=max_ticks,
+        )
+
+        replayed = replay_trace(trace.to_json(), build_evaluation_world)
+        results.append({
+            "policy_id": policy_id,
+            "seed": seed,
+            "scenario_id": SCENARIO_ID,
+            "initial_host_ids": initial_host_ids,
+            "metrics": summarize_world(
+                replayed,
+                initial_resources,
+                initial_world=initial_world,
+                decisions_proposed=sum(
+                    len(row) for row in trace.decisions_by_tick
+                ),
+            ),
+            "trace": trace.to_dict(),
+        })
+
+    return {
+        "evaluation_version": 2,
+        "scenario_id": SCENARIO_ID,
+        "seed": seed,
+        "max_ticks": max_ticks,
+        "same_initial_host_ids": all(
+            item["initial_host_ids"] == initial_host_ids
+            for item in results
+        ),
+        "results": results,
+    }
+
+
+def build_evaluation_world(seed: int):
+    """Build the standard evaluation world with the fixed immediate policy."""
+    world = build_initial_world(seed)
+    world.state.active_policy = policy_config(
+        "baseline_evaluation",
+        ContainmentStrategy.IMMEDIATE,
+    )
+    return world
