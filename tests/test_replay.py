@@ -67,7 +67,7 @@ def test_evaluation_compares_same_initial_conditions_reproducibly():
     assert {item["policy_id"] for item in first["results"]} == {
         "do_nothing_v1", "scripted_defensive_v1"
     }
-    assert first["results"][1]["metrics"]["resource_used"]["analyst_hours"] == 5.0
+    assert first["results"][1]["metrics"]["resource_used"]["analyst_hours"] == 7.0
     by_id = {item["policy_id"]: item for item in first["results"]}
     assert by_id["do_nothing_v1"]["metrics"]["final_compromised_hosts"] == 1
     assert by_id["scripted_defensive_v1"]["metrics"]["final_compromised_hosts"] == 0

@@ -75,6 +75,7 @@ ROLE_PERMISSIONS: Dict[str, frozenset] = {
         for a in (
             ActionType.NETWORK_SCAN,
             ActionType.ISOLATE_HOST,
+            ActionType.UNISOLATE_HOST,
             ActionType.PATCH_HOST,
             ActionType.INVESTIGATE_HOST,
             ActionType.RESTORE_SERVICE,
@@ -89,6 +90,7 @@ ROLE_PERMISSIONS: Dict[str, frozenset] = {
         a.value
         for a in (
             ActionType.ISOLATE_HOST,
+            ActionType.UNISOLATE_HOST,
             ActionType.PATCH_HOST,
             ActionType.RESTORE_SERVICE,
             ActionType.BLOCK_CONNECTION,

@@ -7,6 +7,7 @@ EventType = Literal[
     "IntrusionDetected",
     "HostCompromised",
     "HostIsolated",
+    "HostUnisolated",
     "HostPatched",
     "HostInvestigated",
     "ConnectionBlocked",

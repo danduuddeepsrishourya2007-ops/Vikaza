@@ -31,7 +31,9 @@ def build_initial_world(seed: int = 7) -> World:
             os_version="Ubuntu 24.04",
             ip_address="10.0.1.10",
             is_compromised=True,
+            privilege_level=1,
             running_services={"developer_access": True},
+            open_ports={22, 443},
             known_vulnerabilities=["stolen_credentials"],
         ),
         "application_server": HostState(
@@ -41,6 +43,8 @@ def build_initial_world(seed: int = 7) -> World:
             os_version="Ubuntu 24.04",
             ip_address="10.0.2.10",
             running_services={"customer_api": True, "web": True},
+            open_ports={443, 8443},
+            known_vulnerabilities=["unpatched_application"],
         ),
         "customer_database": HostState(
             host_id="customer_database",
@@ -49,6 +53,8 @@ def build_initial_world(seed: int = 7) -> World:
             os_version="Ubuntu 24.04",
             ip_address="10.0.3.10",
             running_services={"database": True},
+            open_ports={5432},
+            known_vulnerabilities=["weak_service_account"],
             data_stores=["customer_records"],
         ),
     }
@@ -85,6 +91,22 @@ def build_initial_world(seed: int = 7) -> World:
     return world
 
 
+def build_attack_world(seed: int = 7) -> World:
+    """Build the same network with a deterministic simulated attacker agent.
+
+    Kept separate from ``build_initial_world`` so legacy baseline and scaling
+    benchmark sizes remain stable and comparable.
+    """
+    world = build_initial_world(seed)
+    world.state.agents["attacker_1"] = AgentState(
+        agent_id="attacker_1",
+        role="attacker",
+        current_host="developer_workstation",
+    )
+    world.state.scenario_id = "nexus_cyber_attack_v1"
+    return world
+
+
 def policy_config(name: str, strategy: ContainmentStrategy) -> PolicyConfig:
     return PolicyConfig(
         name=name,
@@ -93,11 +115,23 @@ def policy_config(name: str, strategy: ContainmentStrategy) -> PolicyConfig:
         allowed_actions=[
             ActionType.INVESTIGATE_HOST.value,
             ActionType.ISOLATE_HOST.value,
+            ActionType.UNISOLATE_HOST.value,
             ActionType.PATCH_HOST.value,
             ActionType.RESTORE_SERVICE.value,
             ActionType.BLOCK_CONNECTION.value,
             ActionType.NOTIFY_CUSTOMERS.value,
             ActionType.ESCALATE_INCIDENT.value,
+            ActionType.NETWORK_SCAN.value,
+            ActionType.PORT_SCAN.value,
+            ActionType.VULNERABILITY_SCAN.value,
+            ActionType.CREDENTIAL_DUMP.value,
+            ActionType.PRIVILEGE_ESCALATION.value,
+            ActionType.PERSISTENCE.value,
+            ActionType.LATERAL_MOVE.value,
+            ActionType.DATA_EXFILTRATION.value,
+            ActionType.COMMAND_AND_CONTROL.value,
+            ActionType.DEFENSE_EVASION.value,
+            ActionType.IMPACT.value,
             ActionType.NO_OP.value,
         ],
         communication_delay_ticks=0,
@@ -139,7 +173,11 @@ def run_policy(name: str, strategy: ContainmentStrategy, seed: int = 7) -> dict[
                       "Patch and remediate the compromised workstation")
         ]
         action_schedule[2] = [
-            _decision(2, ActionType.RESTORE_SERVICE, "developer_workstation",
+            _decision(2, ActionType.UNISOLATE_HOST, "developer_workstation",
+                      "Reconnect the remediated workstation after containment")
+        ]
+        action_schedule[3] = [
+            _decision(3, ActionType.RESTORE_SERVICE, "developer_workstation",
                       "Restore approved workstation services after remediation")
         ]
     elif strategy is ContainmentStrategy.GRADUAL:
@@ -156,7 +194,11 @@ def run_policy(name: str, strategy: ContainmentStrategy, seed: int = 7) -> dict[
                       "Patch and remediate the compromised workstation")
         ]
         action_schedule[3] = [
-            _decision(3, ActionType.RESTORE_SERVICE, "developer_workstation",
+            _decision(3, ActionType.UNISOLATE_HOST, "developer_workstation",
+                      "Reconnect the remediated workstation after containment")
+        ]
+        action_schedule[4] = [
+            _decision(4, ActionType.RESTORE_SERVICE, "developer_workstation",
                       "Restore approved workstation services after remediation")
         ]
 

@@ -33,6 +33,11 @@ def summarize_world(
         sum(1 for is_running in host.running_services.values() if is_running)
         for host in hosts
     )
+    # A running process on an isolated host is not externally available.
+    available_services = sum(
+        sum(1 for is_running in host.running_services.values() if is_running)
+        for host in hosts if not host.isolated
+    )
 
     events = list(state.events)
     rejected = sum(
@@ -114,10 +119,11 @@ def summarize_world(
         "time_to_containment_ticks": containment_tick,
         "hosts_patched": patched_events,
         "final_services_running": running_services,
+        "final_services_available": available_services,
         "total_services": total_services,
-        "final_services_down": total_services - running_services,
+        "final_services_down": total_services - available_services,
         "service_availability_fraction": (
-            running_services / total_services if total_services else 1.0
+            available_services / total_services if total_services else 1.0
         ),
         "service_down_events": service_down_events,
         "service_restored_events": service_restored_events,

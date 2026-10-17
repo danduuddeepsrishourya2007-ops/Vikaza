@@ -25,6 +25,7 @@ class ActionType(Enum):
 
     # Phase 1B: defender / coordination actions
     ISOLATE_HOST = "ISOLATE_HOST"
+    UNISOLATE_HOST = "UNISOLATE_HOST"
     RESTORE_SERVICE = "RESTORE_SERVICE"
     PATCH_HOST = "PATCH_HOST"
     INVESTIGATE_HOST = "INVESTIGATE_HOST"

@@ -270,3 +270,23 @@ def test_provider_policy_ids_must_be_unique():
             seeds=[7],
             max_ticks=1,
         )
+
+
+def test_isolated_host_services_do_not_count_as_externally_available():
+    from scenarios.cyber_containment import build_initial_world
+    from simulation.evaluation import summarize_world
+
+    world = build_initial_world(7)
+    initial = build_initial_world(7)
+    host = world.state.hosts["developer_workstation"]
+    host.isolated = True
+    # The process is running, but network isolation makes it unavailable.
+    host.running_services["developer_access"] = True
+    metrics = summarize_world(
+        world, dict(world.state.resource_pool), initial_world=initial,
+        decisions_proposed=0,
+    )
+    assert metrics["final_services_running"] == metrics["total_services"]
+    assert metrics["final_services_available"] == metrics["total_services"] - 1
+    assert metrics["final_services_down"] == 1
+    assert metrics["service_availability_fraction"] < 1.0

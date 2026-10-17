@@ -29,8 +29,8 @@ def test_immediate_policy_isolates_before_gradual_policy():
     gradual = run_policy("Gradual", ContainmentStrategy.GRADUAL, seed=3)
     assert immediate["metrics"]["first_isolation_tick"] == 0
     assert gradual["metrics"]["first_isolation_tick"] == 1
-    assert immediate["metrics"]["analyst_hours_used"] == 6.0
-    assert gradual["metrics"]["analyst_hours_used"] == 7.0
+    assert immediate["metrics"]["analyst_hours_used"] == 7.0
+    assert gradual["metrics"]["analyst_hours_used"] == 8.0
 
 
 def test_same_policy_and_seed_are_reproducible():

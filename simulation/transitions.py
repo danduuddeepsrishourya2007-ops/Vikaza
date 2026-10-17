@@ -36,6 +36,10 @@ ACTION_RESOURCE_COSTS: Dict[
         "analyst_hours": 2.0,
     },
 
+    ActionType.UNISOLATE_HOST: {
+        "analyst_hours": 1.0,
+    },
+
     ActionType.RESTORE_SERVICE: {
         "analyst_hours": 1.0,
     },
@@ -167,6 +171,7 @@ def precondition_failure(
 
     target_required = {
         ActionType.ISOLATE_HOST,
+        ActionType.UNISOLATE_HOST,
         ActionType.RESTORE_SERVICE,
         ActionType.PATCH_HOST,
         ActionType.INVESTIGATE_HOST,
@@ -207,11 +212,48 @@ def precondition_failure(
 
         return None
 
-    if action in target_required:
+    attacker_host_actions = {
+        ActionType.PORT_SCAN, ActionType.VULNERABILITY_SCAN,
+        ActionType.CREDENTIAL_DUMP, ActionType.PRIVILEGE_ESCALATION,
+        ActionType.PERSISTENCE, ActionType.LATERAL_MOVE,
+        ActionType.DATA_EXFILTRATION, ActionType.COMMAND_AND_CONTROL,
+        ActionType.DEFENSE_EVASION, ActionType.IMPACT,
+    }
+    if action in attacker_host_actions or (
+        action == ActionType.NETWORK_SCAN and target is not None
+    ):
+        if not target:
+            return f"{action.value} requires a host target"
         if target not in world_state.hosts:
-            return (
-                f"Unknown host: {target}"
-            )
+            return f"Unknown host: {target}"
+
+    if action == ActionType.NETWORK_SCAN and target is not None and target not in world_state.hosts:
+        return f"Unknown host: {target}"
+
+    if action == ActionType.LATERAL_MOVE:
+        actor = world_state.agents.get(decision.agent_id)
+        if actor is not None and target not in world_state.network.get(actor.current_host, set()):
+            return "LATERAL_MOVE target must be directly connected to the attacker's current host"
+
+    if action in target_required and target not in world_state.hosts:
+        return f"Unknown host: {target}"
+
+    if action == ActionType.UNISOLATE_HOST:
+        host = world_state.hosts.get(target)
+        if host is not None and not host.isolated:
+            return "UNISOLATE_HOST requires an isolated host"
+        if host is not None and host.is_compromised:
+            return "UNISOLATE_HOST requires a remediated host"
+
+    if action == ActionType.RESTORE_SERVICE:
+        host = world_state.hosts.get(target)
+        if host is not None and host.isolated:
+            return "UNISOLATE_HOST must be completed before restoring service availability"
+
+    if action == ActionType.PATCH_HOST:
+        host = world_state.hosts.get(target)
+        if host is not None and host.is_compromised and not host.isolated:
+            return "ISOLATE_HOST must be completed before patching a compromised host"
 
     return None
 
@@ -242,24 +284,50 @@ def transition_isolate_host(
         return False, None
 
     host.isolated = True
+    services_taken_down = sorted(
+        service for service, running in host.running_services.items() if running
+    )
+    for service in services_taken_down:
+        host.running_services[service] = False
 
     _deduct_resources(
         world_state,
         ActionType.ISOLATE_HOST,
     )
 
-    return (
-        True,
-        {
-            "type": "HostIsolated",
-            "payload": {
-                "host_id": decision.target,
-            },
-            "tags": [
-                "security_team"
-            ],
+    event_data = {
+        "type": "HostIsolated",
+        "payload": {
+            "host_id": decision.target,
+            "services_taken_down": services_taken_down,
         },
-    )
+        "tags": ["security_team"],
+    }
+    if services_taken_down:
+        event_data["additional_events"] = [{
+            "type": "ServiceDown",
+            "payload": {"host_id": decision.target, "services": services_taken_down, "reason": "host_isolation"},
+            "tags": ["security_team"],
+        }]
+    return True, event_data
+
+
+def transition_unisolate_host(
+    world_state,
+    decision: AgentDecision,
+) -> TransitionResult:
+    host = world_state.hosts.get(decision.target)
+    if host is None or not host.isolated or host.is_compromised:
+        return False, None
+    if not has_sufficient_resources(world_state, ActionType.UNISOLATE_HOST):
+        return False, None
+    host.isolated = False
+    _deduct_resources(world_state, ActionType.UNISOLATE_HOST)
+    return True, {
+        "type": "HostUnisolated",
+        "payload": {"host_id": decision.target},
+        "tags": ["security_team"],
+    }
 
 
 def transition_patch_host(
@@ -285,6 +353,10 @@ def transition_patch_host(
     )
 
     host.is_compromised = False
+    host.persistence_installed = False
+    host.command_and_control_active = False
+    host.defense_evasion_active = False
+    host.known_vulnerabilities.clear()
 
     _deduct_resources(
         world_state,
@@ -588,6 +660,9 @@ TRANSITION_DISPATCH: Dict[
 ] = {
     ActionType.ISOLATE_HOST:
         transition_isolate_host,
+
+    ActionType.UNISOLATE_HOST:
+        transition_unisolate_host,
 
     ActionType.PATCH_HOST:
         transition_patch_host,

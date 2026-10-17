@@ -65,6 +65,10 @@ class HostState:
 
     is_compromised: bool = False
     isolated: bool = False
+    persistence_installed: bool = False
+    command_and_control_active: bool = False
+    defense_evasion_active: bool = False
+    impact_applied: bool = False
 
     privilege_level: int = 0
 
@@ -128,6 +132,7 @@ class AgentState:
     agent_id: str = ""
     role: str = ""
     current_host: Optional[str] = None
+    credentials_obtained: bool = False
 
 
 @dataclass
@@ -216,6 +221,184 @@ class World:
             if self.seed is not None
             else 0
         )
+
+    # ------------------------------------------------------------------
+    # Deterministic simulated attacker effects (no external system access)
+    # ------------------------------------------------------------------
+
+    def _attacker_host(self, decision, *, target: bool = True):
+        """Resolve a host target for a simulated red-team action."""
+        agent = self.state.agents.get(decision.agent_id)
+        host_id = decision.target if target else (agent.current_host if agent else None)
+        if agent is None or agent.role != "attacker":
+            return None, None
+        host = self.state.hosts.get(host_id) if host_id else None
+        if host is None or host.isolated:
+            return agent, None
+        return agent, host
+
+    def _effect_network_scan(self, decision):
+        actor = self.state.agents.get(decision.agent_id)
+        if actor is None:
+            return False, None
+        if actor.role == "attacker":
+            agent, host = self._attacker_host(decision, target=decision.target is not None)
+            source = self.state.hosts.get(agent.current_host) if agent else None
+            if agent is None or source is None or source.isolated or not source.is_compromised:
+                return False, None
+            if host is None:
+                host = source
+            if host.host_id != source.host_id and host.host_id not in self.state.network.get(source.host_id, set()):
+                return False, None
+            discovered = sorted(self.state.network.get(host.host_id, set()))
+            host.logs.append(f"network_scan_tick_{self.state.tick}_by_{decision.agent_id}")
+            return True, {"type": "AgentActionTaken", "payload": {
+                "action": decision.action_type.value, "host_id": host.host_id,
+                "discovered_hosts": discovered,
+            }, "tags": ["attacker"]}
+
+        # Authorized defenders can inventory the topology without an attacker foothold.
+        if actor.role not in {"security_engineer", "it_administrator"}:
+            return False, None
+        if decision.target is not None and decision.target not in self.state.hosts:
+            return False, None
+        scanned = [decision.target] if decision.target else sorted(self.state.hosts)
+        discovered = sorted({
+            neighbor for host_id in scanned
+            for neighbor in self.state.network.get(host_id, set())
+        })
+        return True, {"type": "AgentActionTaken", "payload": {
+            "action": decision.action_type.value, "scanned_hosts": scanned,
+            "discovered_hosts": discovered,
+        }, "tags": ["security_team"]}
+
+    def _effect_port_scan(self, decision):
+        agent, host = self._attacker_host(decision)
+        source = self.state.hosts.get(agent.current_host) if agent else None
+        if (agent is None or source is None or source.isolated or not source.is_compromised
+                or host is None or host.host_id not in {agent.current_host, *self.state.network.get(agent.current_host, set())}):
+            return False, None
+        host.logs.append(f"port_scan_tick_{self.state.tick}_by_{decision.agent_id}")
+        return True, {"type": "AgentActionTaken", "payload": {
+            "action": decision.action_type.value, "host_id": host.host_id,
+            "open_ports": sorted(host.open_ports),
+        }, "tags": ["attacker"]}
+
+    def _effect_vulnerability_scan(self, decision):
+        agent, host = self._attacker_host(decision)
+        source = self.state.hosts.get(agent.current_host) if agent else None
+        if (agent is None or source is None or source.isolated or not source.is_compromised
+                or host is None or host.host_id not in {agent.current_host, *self.state.network.get(agent.current_host, set())}):
+            return False, None
+        findings = sorted(set(host.known_vulnerabilities) - host.installed_patches)
+        host.logs.append(f"vulnerability_scan_tick_{self.state.tick}_by_{decision.agent_id}")
+        return True, {"type": "AgentActionTaken", "payload": {
+            "action": decision.action_type.value, "host_id": host.host_id,
+            "finding_count": len(findings),
+        }, "tags": ["attacker"]}
+
+    def _effect_credential_dump(self, decision):
+        agent, host = self._attacker_host(decision, target=decision.target is not None)
+        if agent is None or host is None or host.host_id != agent.current_host or not host.is_compromised:
+            return False, None
+        agent.credentials_obtained = True
+        host.logs.append(f"credential_access_tick_{self.state.tick}")
+        return True, {"type": "AgentActionTaken", "payload": {
+            "action": decision.action_type.value, "host_id": host.host_id,
+            "credentials_obtained": True,
+        }, "tags": ["attacker"]}
+
+    def _effect_privilege_escalation(self, decision):
+        agent, host = self._attacker_host(decision, target=decision.target is not None)
+        if agent is None or host is None or host.host_id != agent.current_host or not host.is_compromised or not agent.credentials_obtained:
+            return False, None
+        host.privilege_level = min(3, host.privilege_level + 1)
+        return True, {"type": "AgentActionTaken", "payload": {
+            "action": decision.action_type.value, "host_id": host.host_id,
+            "privilege_level": host.privilege_level,
+        }, "tags": ["attacker"]}
+
+    def _effect_persistence(self, decision):
+        agent, host = self._attacker_host(decision, target=decision.target is not None)
+        if agent is None or host is None or host.host_id != agent.current_host or not host.is_compromised or host.privilege_level < 1:
+            return False, None
+        host.persistence_installed = True
+        return True, {"type": "AgentActionTaken", "payload": {
+            "action": decision.action_type.value, "host_id": host.host_id,
+            "persistence_installed": True,
+        }, "tags": ["attacker"]}
+
+    def _effect_lateral_move(self, decision):
+        agent, target = self._attacker_host(decision)
+        source = self.state.hosts.get(agent.current_host) if agent else None
+        if (agent is None or source is None or target is None or source.isolated
+                or not source.is_compromised or not agent.credentials_obtained
+                or target.host_id not in self.state.network.get(source.host_id, set())
+                or target.is_compromised):
+            return False, None
+        target.is_compromised = True
+        target.privilege_level = max(target.privilege_level, 1 if source.privilege_level else 0)
+        agent.current_host = target.host_id
+        return True, {"type": "HostCompromised", "payload": {
+            "host_id": target.host_id, "source_host_id": source.host_id,
+            "method": "lateral_movement",
+        }, "tags": ["attacker", "security_team"]}
+
+    def _effect_command_and_control(self, decision):
+        agent, host = self._attacker_host(decision, target=decision.target is not None)
+        if agent is None or host is None or host.host_id != agent.current_host or not host.is_compromised:
+            return False, None
+        host.command_and_control_active = True
+        return True, {"type": "AgentActionTaken", "payload": {
+            "action": decision.action_type.value, "host_id": host.host_id,
+            "command_and_control_active": True,
+        }, "tags": ["attacker"]}
+
+    def _effect_defense_evasion(self, decision):
+        agent, host = self._attacker_host(decision, target=decision.target is not None)
+        if agent is None or host is None or host.host_id != agent.current_host or not host.is_compromised:
+            return False, None
+        host.defense_evasion_active = True
+        return True, {"type": "AgentActionTaken", "payload": {
+            "action": decision.action_type.value, "host_id": host.host_id,
+            "defense_evasion_active": True,
+        }, "tags": ["attacker"]}
+
+    def _effect_data_exfiltration(self, decision):
+        agent, host = self._attacker_host(decision)
+        if (agent is None or host is None or host.host_id != agent.current_host
+                or not host.is_compromised or not host.command_and_control_active):
+            return False, None
+        stores = [store for store in self.state.data_stores.values()
+                  if store.location_host == host.host_id and not store.is_exfiltrated]
+        if not stores:
+            return False, None
+        total_gb = 0.0
+        store_ids = []
+        for store in sorted(stores, key=lambda item: item.store_id):
+            store.is_exfiltrated = True
+            store.access_logs.append(f"exfiltrated_tick_{self.state.tick}")
+            total_gb += store.size_gb
+            store_ids.append(store.store_id)
+        return True, {"type": "DataExfiltrated", "payload": {
+            "host_id": host.host_id, "store_ids": store_ids,
+            "size_gb": round(total_gb, 3),
+        }, "tags": ["attacker", "security_team"]}
+
+    def _effect_impact(self, decision):
+        agent, host = self._attacker_host(decision)
+        if agent is None or host is None or host.host_id != agent.current_host or not host.is_compromised:
+            return False, None
+        down = sorted(name for name, running in host.running_services.items() if running)
+        if not down:
+            return False, None
+        for service in down:
+            host.running_services[service] = False
+        host.impact_applied = True
+        return True, {"type": "ServiceDown", "payload": {
+            "host_id": host.host_id, "services": down,
+            "action": decision.action_type.value,
+        }, "tags": ["attacker", "security_team"]}
 
     # ------------------------------------------------------------------
     # Event emission
@@ -603,15 +786,16 @@ class World:
             event = self.emit_event(
                 event_data.get("type"),
                 decision.agent_id,
-                event_data.get(
-                    "payload",
-                    {},
-                ),
-                event_data.get(
-                    "tags",
-                    (),
-                ),
+                event_data.get("payload", {}),
+                event_data.get("tags", ()),
             )
+            for extra in event_data.get("additional_events", []):
+                self.emit_event(
+                    extra.get("type"),
+                    decision.agent_id,
+                    extra.get("payload", {}),
+                    extra.get("tags", ()),
+                )
 
         return AgentActionTaken(
             agent_id=decision.agent_id,

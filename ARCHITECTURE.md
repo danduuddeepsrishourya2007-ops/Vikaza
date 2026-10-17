@@ -55,7 +55,7 @@ Specialized cyber-incident simulation built on Nexus Core:
 - **Inference**: LLM client interfaces, routing, and prompt management
 - **Scenarios**: Scenario definitions, with initial focus on cyber scenarios
 - **Evaluation**: Metrics calculation and benchmarking tools
-- **Frontend**: User interface (placeholder for future development)
+- **Frontend**: Local browser dashboard in `dashboard/index.html`, served by the standard-library HTTP API in `backend/api/main.py`
 - **Tests**: Test suite for all components
 
 ## Data Flow
@@ -69,3 +69,7 @@ Specialized cyber-incident simulation built on Nexus Core:
 - Deterministic simulation prevents unpredictable AI behavior from corrupting core mechanics
 - LLM interactions are sandboxed and monitored
 - Simulation boundaries ensure AI decisions affect only the simulated environment
+
+## GPU-independent completion boundary
+
+The deterministic simulation, baseline experiment runner, active simulated attack scenario, replay verification, and localhost dashboard can run on CPU with the Python standard library. The optional OpenAI-compatible provider is an adapter only; it does not provision a model server. GPU inference, ROCm/vLLM setup, and MI300X benchmarks remain separate integration work and must not be claimed without measurements on the actual serving hardware. The current cyber scenario is a discrete illustrative model, not a validated operational cyber range.

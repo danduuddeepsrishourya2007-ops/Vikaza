@@ -6,20 +6,33 @@ from typing import Any, Callable
 
 from scenarios.cyber_containment import (
     SCENARIO_ID,
+    build_attack_world,
     build_initial_world,
     policy_config,
 )
-from simulation.baselines import DoNothingProvider, ScriptedDefensiveProvider
+from simulation.baselines import (
+    AttackScenarioProvider, DoNothingProvider, ScriptedDefensiveProvider,
+)
 from simulation.evaluation import summarize_world
 from simulation.policy import ContainmentStrategy
 from simulation.replay import run_and_record, replay_trace
 
 
 def configured_world(seed: int):
-    """Build a fresh world with the fixed experiment policy."""
+    """Build a fresh two-defender containment evaluation world."""
     world = build_initial_world(seed)
     world.state.active_policy = policy_config(
         "nexus_experiment",
+        ContainmentStrategy.IMMEDIATE,
+    )
+    return world
+
+
+def configured_attack_world(seed: int):
+    """Build a fresh world with a simulated attacker and the same policy."""
+    world = build_attack_world(seed)
+    world.state.active_policy = policy_config(
+        "nexus_attack_experiment",
         ContainmentStrategy.IMMEDIATE,
     )
     return world
@@ -31,6 +44,7 @@ def evaluate_provider(
     seed: int = 7,
     max_ticks: int = 5,
     verify_replay: bool = True,
+    world_factory: Callable[[int], Any] | None = None,
 ) -> dict[str, Any]:
     """Run one provider with a fixed seed and return trace plus measured outcomes."""
     if not isinstance(policy_id, str) or not policy_id.strip():
@@ -48,8 +62,9 @@ def evaluate_provider(
 
     # Keep a separate initial world. The simulated world is mutated during the
     # run, whereas the initial world remains the authoritative initial snapshot.
-    world = configured_world(seed)
-    initial_world = configured_world(seed)
+    make_world = world_factory or configured_world
+    world = make_world(seed)
+    initial_world = make_world(seed)
     initial_resources = dict(world.state.resource_pool)
 
     trace = run_and_record(
@@ -60,7 +75,7 @@ def evaluate_provider(
     )
 
     if verify_replay:
-        final_world = replay_trace(trace.to_json(), configured_world)
+        final_world = replay_trace(trace.to_json(), make_world)
     else:
         final_world = world
 
@@ -85,7 +100,7 @@ def evaluate_provider(
 
     return {
         "policy_id": policy_id,
-        "scenario_id": SCENARIO_ID,
+        "scenario_id": world.state.scenario_id or SCENARIO_ID,
         "seed": seed,
         "max_ticks": max_ticks,
         "metrics": summarize_world(
@@ -110,6 +125,7 @@ def compare_providers(
     providers: list[tuple[str, Callable[[], Any]]],
     seeds: list[int],
     max_ticks: int = 5,
+    world_factory: Callable[[int], Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate every provider on every seed using a fresh provider per run."""
     if not providers:
@@ -153,6 +169,7 @@ def compare_providers(
                     policy_id,
                     seed,
                     max_ticks,
+                    world_factory=world_factory,
                 )
             )
 
@@ -308,7 +325,7 @@ def compare_providers(
 
     return {
         "report_version": 2,
-        "scenario_id": SCENARIO_ID,
+        "scenario_id": (runs[0]["scenario_id"] if runs else SCENARIO_ID),
         "seeds": list(seeds),
         "max_ticks": max_ticks,
         "summaries": summaries,
@@ -416,3 +433,11 @@ def build_evaluation_world(seed: int):
         ContainmentStrategy.IMMEDIATE,
     )
     return world
+
+
+def attack_provider_factories() -> list[tuple[str, Callable[[], Any]]]:
+    """Return comparable attacker-plus-defender providers for the active-attack mode."""
+    return [
+        (DoNothingProvider.policy_id, lambda: AttackScenarioProvider(DoNothingProvider())),
+        (ScriptedDefensiveProvider.policy_id, lambda: AttackScenarioProvider(ScriptedDefensiveProvider())),
+    ]

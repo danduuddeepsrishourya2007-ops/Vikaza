@@ -31,6 +31,8 @@ NEXUS
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Technical architecture and design principles
 - [DECISIONS.md](DECISIONS.md) - Key architectural and product decisions
 - [BENCHMARKS.md](BENCHMARKS.md) - Performance benchmarks and testing methodology
+- [DASHBOARD.md](DASHBOARD.md) - Dashboard startup and API details
+- [GPU_INDEPENDENT_MILESTONE.md](GPU_INDEPENDENT_MILESTONE.md) - CPU-only scope and verification boundary
 
 ## Getting Started
 
@@ -45,18 +47,33 @@ The current executable scenario compares immediate and gradual containment from
 equivalent initial host/network states and a shared seed. The timeline and
 resource metrics are derived from the simulation's state and event log.
 
+## NEXUS Cyber Dashboard
+
+A local browser dashboard connects to the Python simulation engine for seeded baseline comparisons and an active, deterministic red-team scenario. It displays measured outcomes, the network topology, recorded decisions/events, replay status, and JSON report exports. See [DASHBOARD.md](DASHBOARD.md) for startup and API details.
+
+Start it from the repository root with:
+
+```powershell
+python -m backend.api.main
+```
+
+Then open <http://127.0.0.1:8765>. Choose **Containment baseline** or **Active simulated attack** from the scenario selector. Both modes run on CPU; neither claims that an LLM or GPU was used.
+
 ## Current MVP status
 
-Implemented in this repository:
-- Deterministic world state, event log, scheduler, action validation, and transitions.
-- Cyber containment scenario with immediate-versus-gradual policy execution.
-- State/event-derived comparison output and scenario regression tests.
+Implemented and testable without GPU hardware:
+- Deterministic world state, event log, scheduler, action validation, role permissions, resource accounting, and replay.
+- Defender containment, patching, service isolation/recovery, and explicit service-down events.
+- In-memory simulated red-team actions: scans, credential access, privilege escalation, persistence, lateral movement, command-and-control, data-store exfiltration, defense evasion, and service impact. These actions never touch real networks or hosts.
+- A seven-tick active-attack comparison: do-nothing versus scripted defense, with state-derived compromise, exfiltration, service availability, resource, and action metrics.
+- Local dashboard and HTTP API, input validation, JSON export, seeded comparisons, and replay verification.
+- Optional OpenAI-compatible inference adapter and deterministic fallback boundary; a reachable model endpoint is not bundled.
 
-Not yet implemented or verified:
-- Browser UI and visual topology/timeline.
-- LLM inference integration.
-- Execution on AMD MI300X hardware, ROCm, or vLLM.
-- Multi-host attacker propagation and modeled data exfiltration. Do not present these as implemented capabilities.
+Still outside the GPU-independent completion boundary:
+- Hosted/production dashboard deployment, authentication, multi-user persistence, and deployment hardening.
+- Real model-backed decision-quality evaluation requires a reachable compatible inference endpoint and must be run separately from deterministic baselines.
+- AMD MI300X/ROCm/vLLM integration and GPU throughput/latency claims require access to that hardware and serving stack.
+- The cyber model is an illustrative discrete simulation, not a validated prediction of real-world incidents; exfiltration is whole-store rather than byte-by-byte, and service downtime is not duration-weighted.
 
 
 ## License
@@ -69,9 +86,10 @@ Run reproducible baseline comparisons without an LLM, API key, or GPU:
 python -m compileall -q simulation scenarios tests
 python -m pytest -q
 python -m simulation --seeds 7,17,42 --ticks 5 --output artifacts/nexus-evaluation.json
+python -m simulation --mode active_attack --seeds 7,17,42 --ticks 7 --output artifacts/nexus-active-attack-evaluation.json
 ```
 
-The JSON report includes each seed's trace, replay verification, state-derived metrics, and mean numeric metrics by policy. This is the current CPU-only evaluation path.
+The JSON report includes each seed's trace, replay verification, state-derived metrics, and mean numeric metrics by policy. `artifacts/nexus-active-attack-evaluation.json` is the checked-in example for the active-attack path. See [GPU_INDEPENDENT_MILESTONE.md](GPU_INDEPENDENT_MILESTONE.md) for exact measurement boundaries.
 
 ### Optional OpenAI-compatible inference endpoint
 
