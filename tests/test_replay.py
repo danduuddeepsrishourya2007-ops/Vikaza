@@ -106,3 +106,30 @@ def test_snapshot_fails_closed_for_pending_callbacks():
 
     with pytest.raises(TraceError, match="pending scheduler callback"):
         world_snapshot(world)
+
+
+def test_replay_rejects_factory_with_wrong_seed():
+    world = build_evaluation_world(12)
+    trace = run_and_record(world, DoNothingProvider(), DoNothingProvider.policy_id, 2)
+
+    with pytest.raises(TraceError, match="Seed mismatch"):
+        replay_trace(trace.to_json(), lambda _seed: build_evaluation_world(13))
+
+
+def test_run_and_record_requires_fresh_world_and_nonempty_policy_id():
+    world = build_evaluation_world(17)
+    world.step()
+    with pytest.raises(ValueError, match="fresh world"):
+        run_and_record(world, DoNothingProvider(), DoNothingProvider.policy_id, 1)
+
+    with pytest.raises(ValueError, match="policy_id"):
+        run_and_record(build_evaluation_world(17), DoNothingProvider(), "  ", 1)
+
+
+def test_replay_validates_manually_constructed_trace_objects():
+    world = build_evaluation_world(18)
+    trace = run_and_record(world, DoNothingProvider(), DoNothingProvider.policy_id, 2)
+    trace.decisions_by_tick = trace.decisions_by_tick[:1]
+
+    with pytest.raises(TraceError, match="exactly max_ticks"):
+        replay_trace(trace, build_evaluation_world)

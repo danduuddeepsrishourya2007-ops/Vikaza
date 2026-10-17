@@ -196,6 +196,10 @@ class SimulationTrace:
 def run_and_record(world: World, provider: DecisionProvider, policy_id: str, max_ticks: int = 5) -> SimulationTrace:
     if max_ticks < 1:
         raise ValueError("max_ticks must be positive")
+    if world.state.tick != 0:
+        raise ValueError("Recording requires a fresh world at tick 0")
+    if not isinstance(policy_id, str) or not policy_id.strip():
+        raise ValueError("policy_id must be a non-empty string")
     rows: list[list[dict[str, Any]]] = []
     for _ in range(max_ticks):
         decisions = collect_decisions(world, provider)
@@ -217,7 +221,16 @@ def replay_trace(trace: SimulationTrace | str, world_factory: Callable[[int], Wo
     """Replay recorded decisions through the authoritative engine and verify result."""
     if isinstance(trace, str):
         trace = SimulationTrace.from_json(trace)
-    elif not isinstance(trace, SimulationTrace):
+    elif isinstance(trace, SimulationTrace):
+        # Validate manually constructed objects through the same strict parser
+        # used for serialized traces before trusting their tick/decision layout.
+        try:
+            trace = SimulationTrace.from_json(trace.to_json())
+        except (TypeError, ValueError) as exc:
+            if isinstance(exc, TraceError):
+                raise
+            raise TraceError(f"Invalid trace object: {exc}") from exc
+    else:
         raise TraceError("trace must be SimulationTrace or JSON text")
     world = world_factory(trace.seed)
     if world.state.scenario_id != trace.scenario_id:
@@ -226,6 +239,10 @@ def replay_trace(trace: SimulationTrace | str, world_factory: Callable[[int], Wo
         )
     if world.state.tick != 0:
         raise TraceError("Replay factory must return a fresh world at tick 0")
+    if world.state.rng_seed != trace.seed:
+        raise TraceError(
+            f"Seed mismatch: trace={trace.seed!r}, world={world.state.rng_seed!r}"
+        )
     for tick, row in enumerate(trace.decisions_by_tick):
         if world.state.tick != tick:
             raise TraceError(f"Replay tick mismatch: expected {tick}, got {world.state.tick}")
