@@ -142,7 +142,7 @@ def test_stage5_comparison_reports_paired_outcome_deltas_against_do_nothing():
         max_ticks=5,
     )
 
-    assert report["report_version"] == 2
+    assert report["report_version"] == 3
     paired = report["paired_deltas_vs_do_nothing"][
         ScriptedDefensiveProvider.policy_id
     ]
@@ -290,3 +290,104 @@ def test_isolated_host_services_do_not_count_as_externally_available():
     assert metrics["final_services_available"] == metrics["total_services"] - 1
     assert metrics["final_services_down"] == 1
     assert metrics["service_availability_fraction"] < 1.0
+
+
+def test_initially_isolated_compromised_host_counts_as_contained_at_tick_zero():
+    from scenarios.cyber_containment import build_initial_world
+    from simulation.evaluation import summarize_world
+
+    world = build_initial_world(73)
+    initial_world = build_initial_world(73)
+    target_id = next(
+        host.host_id for host in initial_world.state.hosts.values()
+        if host.is_compromised
+    )
+    initial_world.state.hosts[target_id].isolated = True
+    world.state.hosts[target_id].isolated = True
+
+    metrics = summarize_world(
+        world,
+        dict(world.state.resource_pool),
+        initial_world=initial_world,
+        decisions_proposed=0,
+    )
+
+    assert metrics["containment_achieved"] is True
+    assert metrics["time_to_containment_ticks"] == 0
+
+
+def test_stage6_comparison_reports_paired_candidate_deltas_vs_scripted_defense():
+    report = compare_providers(
+        [
+            (DoNothingProvider.policy_id, DoNothingProvider),
+            (ScriptedDefensiveProvider.policy_id, ScriptedDefensiveProvider),
+        ],
+        seeds=[7, 17, 31],
+        max_ticks=7,
+        world_factory=__import__("simulation.experiment", fromlist=["configured_attack_world"]).configured_attack_world,
+    )
+
+    assert report["report_version"] == 3
+    paired = report["paired_deltas_vs_scripted_defense"][DoNothingProvider.policy_id]
+    assert paired["baseline_policy_id"] == ScriptedDefensiveProvider.policy_id
+    assert [row["seed"] for row in paired["per_seed"]] == [7, 17, 31]
+    assert paired["aggregate_deltas"]["containment_success_rate_delta"] == -1.0
+    assert all(row["candidate_containment_achieved"] is False for row in paired["per_seed"])
+    assert all(row["scripted_containment_achieved"] is True for row in paired["per_seed"])
+    assert all("time_to_containment_ticks" not in row["delta_vs_scripted_defense"] for row in paired["per_seed"])
+    assert paired["containment_time_pairing"]["excluded_pairs"] == 3
+
+
+def test_stage6_scripted_defense_comparison_has_zero_paired_deltas():
+    report = compare_providers(
+        [
+            (DoNothingProvider.policy_id, DoNothingProvider),
+            (ScriptedDefensiveProvider.policy_id, ScriptedDefensiveProvider),
+            ("scripted_clone_test", ScriptedDefensiveProvider),
+        ],
+        seeds=[7, 17],
+        max_ticks=7,
+        world_factory=__import__("simulation.experiment", fromlist=["configured_attack_world"]).configured_attack_world,
+    )
+
+    paired = report["paired_deltas_vs_scripted_defense"]["scripted_clone_test"]
+    assert paired["aggregate_deltas"]["containment_success_rate_delta"] == 0.0
+    assert all(
+        all(value == 0.0 for value in row["delta_vs_scripted_defense"].values())
+        for row in paired["per_seed"]
+    )
+
+
+def test_stage6_summary_aggregates_llm_fallback_provenance_and_provider_stats():
+    from simulation.llm_provider import FallbackProvider, OpenAICompatibleProvider, ProviderError
+
+    def unavailable_transport(*args):
+        raise ProviderError("offline test", category="network_error")
+
+    def candidate_factory():
+        primary = OpenAICompatibleProvider(
+            "http://localhost:8000/v1",
+            "offline-test",
+            transport=unavailable_transport,
+        )
+        return FallbackProvider(primary, ScriptedDefensiveProvider())
+
+    report = compare_providers(
+        [
+            (DoNothingProvider.policy_id, DoNothingProvider),
+            (ScriptedDefensiveProvider.policy_id, ScriptedDefensiveProvider),
+            ("candidate_llm_with_fallback_test", candidate_factory),
+        ],
+        seeds=[7],
+        max_ticks=2,
+    )
+
+    summary = report["summaries"]["candidate_llm_with_fallback_test"]
+    provenance = summary["decision_provenance"]
+    assert provenance["source_counts"]["fallback_heuristic"] > 0
+    assert provenance["source_counts"]["llm"] == 0
+    assert provenance["fallback_decision_rate"] > 0
+    assert provenance["fallback_reason_counts"]["network_error"] > 0
+    assert summary["provider_stats"]["total_calls"] == 4
+    assert summary["provider_stats"]["total_failures"] == 4
+    assert report["paired_deltas_vs_scripted_defense"]["candidate_llm_with_fallback_test"]

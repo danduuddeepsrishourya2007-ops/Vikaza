@@ -220,9 +220,17 @@ class OpenAICompatibleProvider:
                 raise ProviderError("LLM decision content is not valid JSON", category="invalid_decision") from exc
             if not isinstance(content, dict):
                 raise ProviderError("LLM decision must be a JSON object", category="invalid_decision")
-            if set(content) - {"action_type", "target", "rationale"}:
+            allowed_fields = {"action_type", "target", "rationale"}
+            if set(content) - allowed_fields:
                 raise ProviderError("LLM decision contains unsupported fields", category="invalid_decision")
-            raw_action = content.get("action_type")
+            required_fields = allowed_fields
+            missing_fields = required_fields - set(content)
+            if missing_fields:
+                raise ProviderError(
+                    f"LLM decision is missing required fields: {', '.join(sorted(missing_fields))}",
+                    category="invalid_decision",
+                )
+            raw_action = content["action_type"]
             try:
                 action = ActionType(raw_action)
             except (ValueError, TypeError) as exc:

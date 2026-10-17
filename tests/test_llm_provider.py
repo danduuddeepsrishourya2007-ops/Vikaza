@@ -183,3 +183,27 @@ def test_unknown_action_error_does_not_echo_untrusted_action_text():
         provider.decide(observe(configured_world(), "security_engineer_1"))
     assert caught.value.category == "unknown_action"
     assert secret_like_text not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"target":"developer_workstation","rationale":"Contain it."}',
+        '{"action_type":"ISOLATE_HOST","rationale":"Contain it."}',
+        '{"action_type":"ISOLATE_HOST","target":"developer_workstation"}',
+    ],
+    ids=["missing-action-type", "missing-target", "missing-rationale"],
+)
+def test_provider_rejects_decisions_missing_required_fields_and_uses_fallback(content):
+    primary = OpenAICompatibleProvider(
+        "http://localhost:8000/v1", "test-model",
+        transport=lambda *args: response(content),
+    )
+    provider = FallbackProvider(primary, ScriptedDefensiveProvider())
+    decision = provider.decide(observe(configured_world(), "security_engineer_1"))
+
+    assert decision.source == "fallback_heuristic"
+    assert decision.failure_reason == "invalid_decision"
+    assert provider.stats.failed_decisions == 1
+    assert provider.stats.fallback_decisions == 1
+    assert primary.failures == 1

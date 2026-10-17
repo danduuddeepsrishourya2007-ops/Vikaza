@@ -205,6 +205,8 @@ class SimulationTrace:
         required = {"trace_version", "scenario_id", "seed", "policy_id", "max_ticks", "decisions_by_tick", "expected_final_snapshot"}
         if not required.issubset(data):
             raise TraceError(f"Trace is missing fields: {sorted(required - set(data))}")
+        if not isinstance(data["trace_version"], int) or isinstance(data["trace_version"], bool):
+            raise TraceError("Trace version must be an integer")
         if data["trace_version"] != TRACE_VERSION:
             raise TraceError(f"Unsupported trace version: {data['trace_version']!r}")
         if not isinstance(data["seed"], int) or isinstance(data["seed"], bool):

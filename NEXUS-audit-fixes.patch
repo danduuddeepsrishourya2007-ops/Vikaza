@@ -1,0 +1,162 @@
+--- a/simulation/llm_provider.py
++++ b/simulation/llm_provider.py
+@@ -220,9 +220,17 @@
+                 raise ProviderError("LLM decision content is not valid JSON", category="invalid_decision") from exc
+             if not isinstance(content, dict):
+                 raise ProviderError("LLM decision must be a JSON object", category="invalid_decision")
+-            if set(content) - {"action_type", "target", "rationale"}:
++            allowed_fields = {"action_type", "target", "rationale"}
++            if set(content) - allowed_fields:
+                 raise ProviderError("LLM decision contains unsupported fields", category="invalid_decision")
+-            raw_action = content.get("action_type")
++            required_fields = allowed_fields
++            missing_fields = required_fields - set(content)
++            if missing_fields:
++                raise ProviderError(
++                    f"LLM decision is missing required fields: {', '.join(sorted(missing_fields))}",
++                    category="invalid_decision",
++                )
++            raw_action = content["action_type"]
+             try:
+                 action = ActionType(raw_action)
+             except (ValueError, TypeError) as exc:
+--- a/simulation/evaluation.py
++++ b/simulation/evaluation.py
+@@ -18,6 +18,7 @@
+     has been isolated. A host compromised during the run is not part of that
+     initial target set.
+ 
++    Hosts already isolated in the initial state count as contained at tick 0.
+     If the initial target set is empty, containment is reported as unsuccessful
+     with no containment time. This avoids treating an empty set as a successful
+     containment outcome through vacuous truth.
+@@ -74,20 +75,32 @@
+         if host.is_compromised
+     }
+ 
+-    isolated_initial_compromises: set[str] = set()
++    initially_isolated_compromises = {
++        host.host_id
++        for host in (
++            initial_world.state.hosts.values()
++            if initial_world is not None
++            else []
++        )
++        if host.is_compromised and host.isolated
++    }
++    isolated_initial_compromises: set[str] = set(initially_isolated_compromises)
+     containment_tick = None
+ 
+     # Empty initial target sets do not count as successful containment.
+     if initially_compromised:
+-        for event in sorted(events, key=lambda item: (item.tick, item.event_id)):
+-            if event.event_type == "HostIsolated":
+-                host_id = event.payload.get("host_id")
+-                if host_id in initially_compromised:
+-                    isolated_initial_compromises.add(host_id)
+-
+-            if initially_compromised.issubset(isolated_initial_compromises):
+-                containment_tick = event.tick
+-                break
++        if initially_compromised.issubset(isolated_initial_compromises):
++            containment_tick = 0
++        else:
++            for event in sorted(events, key=lambda item: (item.tick, item.event_id)):
++                if event.event_type == "HostIsolated":
++                    host_id = event.payload.get("host_id")
++                    if host_id in initially_compromised:
++                        isolated_initial_compromises.add(host_id)
++
++                if initially_compromised.issubset(isolated_initial_compromises):
++                    containment_tick = event.tick
++                    break
+ 
+     final_compromised_hosts = sum(
+         1 for host in hosts if host.is_compromised
+--- a/simulation/replay.py
++++ b/simulation/replay.py
+@@ -205,6 +205,8 @@
+         required = {"trace_version", "scenario_id", "seed", "policy_id", "max_ticks", "decisions_by_tick", "expected_final_snapshot"}
+         if not required.issubset(data):
+             raise TraceError(f"Trace is missing fields: {sorted(required - set(data))}")
++        if not isinstance(data["trace_version"], int) or isinstance(data["trace_version"], bool):
++            raise TraceError("Trace version must be an integer")
+         if data["trace_version"] != TRACE_VERSION:
+             raise TraceError(f"Unsupported trace version: {data['trace_version']!r}")
+         if not isinstance(data["seed"], int) or isinstance(data["seed"], bool):
+--- a/tests/test_llm_provider.py
++++ b/tests/test_llm_provider.py
+@@ -183,3 +183,27 @@
+         provider.decide(observe(configured_world(), "security_engineer_1"))
+     assert caught.value.category == "unknown_action"
+     assert secret_like_text not in str(caught.value)
++
++
++@pytest.mark.parametrize(
++    "content",
++    [
++        '{"target":"developer_workstation","rationale":"Contain it."}',
++        '{"action_type":"ISOLATE_HOST","rationale":"Contain it."}',
++        '{"action_type":"ISOLATE_HOST","target":"developer_workstation"}',
++    ],
++    ids=["missing-action-type", "missing-target", "missing-rationale"],
++)
++def test_provider_rejects_decisions_missing_required_fields_and_uses_fallback(content):
++    primary = OpenAICompatibleProvider(
++        "http://localhost:8000/v1", "test-model",
++        transport=lambda *args: response(content),
++    )
++    provider = FallbackProvider(primary, ScriptedDefensiveProvider())
++    decision = provider.decide(observe(configured_world(), "security_engineer_1"))
++
++    assert decision.source == "fallback_heuristic"
++    assert decision.failure_reason == "invalid_decision"
++    assert provider.stats.failed_decisions == 1
++    assert provider.stats.fallback_decisions == 1
++    assert primary.failures == 1
+--- a/tests/test_experiment.py
++++ b/tests/test_experiment.py
+@@ -290,3 +290,27 @@
+     assert metrics["final_services_available"] == metrics["total_services"] - 1
+     assert metrics["final_services_down"] == 1
+     assert metrics["service_availability_fraction"] < 1.0
++
++
++def test_initially_isolated_compromised_host_counts_as_contained_at_tick_zero():
++    from scenarios.cyber_containment import build_initial_world
++    from simulation.evaluation import summarize_world
++
++    world = build_initial_world(73)
++    initial_world = build_initial_world(73)
++    target_id = next(
++        host.host_id for host in initial_world.state.hosts.values()
++        if host.is_compromised
++    )
++    initial_world.state.hosts[target_id].isolated = True
++    world.state.hosts[target_id].isolated = True
++
++    metrics = summarize_world(
++        world,
++        dict(world.state.resource_pool),
++        initial_world=initial_world,
++        decisions_proposed=0,
++    )
++
++    assert metrics["containment_achieved"] is True
++    assert metrics["time_to_containment_ticks"] == 0
+--- a/tests/test_replay.py
++++ b/tests/test_replay.py
+@@ -204,3 +204,13 @@
+     assert restored.action_type == ActionType.NO_OP
+     assert restored.source == "scripted"
+     assert restored.failure_reason is None
++
++
++def test_trace_rejects_boolean_trace_version():
++    world = build_evaluation_world(48)
++    trace = run_and_record(world, DoNothingProvider(), DoNothingProvider.policy_id, 1)
++    data = trace.to_dict()
++    data["trace_version"] = True  # bool is an int subclass in Python; it is not a valid version.
++
++    with pytest.raises(TraceError, match="Trace version must be an integer"):
++        SimulationTrace.from_json(json.dumps(data))

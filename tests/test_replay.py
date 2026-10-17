@@ -204,3 +204,13 @@ def test_decision_trace_accepts_legacy_entry_without_failure_reason():
     assert restored.action_type == ActionType.NO_OP
     assert restored.source == "scripted"
     assert restored.failure_reason is None
+
+
+def test_trace_rejects_boolean_trace_version():
+    world = build_evaluation_world(48)
+    trace = run_and_record(world, DoNothingProvider(), DoNothingProvider.policy_id, 1)
+    data = trace.to_dict()
+    data["trace_version"] = True  # bool is an int subclass in Python; it is not a valid version.
+
+    with pytest.raises(TraceError, match="Trace version must be an integer"):
+        SimulationTrace.from_json(json.dumps(data))

@@ -208,6 +208,28 @@ def compare_providers(
             )
         ]
 
+        source_totals = {"llm": 0, "scripted": 0, "fallback_heuristic": 0}
+        fallback_reasons: dict[str, int] = {}
+        provider_call_totals = {"calls": 0, "failures": 0, "total_latency_seconds": 0.0}
+        provider_stats_available = False
+        for policy_run in policy_runs:
+            provenance = policy_run.get("decision_provenance", {})
+            for source, count in provenance.get("source_counts", {}).items():
+                if source in source_totals and isinstance(count, int) and not isinstance(count, bool):
+                    source_totals[source] += count
+            for reason, count in provenance.get("fallback_reason_counts", {}).items():
+                if isinstance(count, int) and not isinstance(count, bool):
+                    fallback_reasons[reason] = fallback_reasons.get(reason, 0) + count
+            stats = policy_run.get("provider_stats") or {}
+            primary_stats = stats.get("primary", {}) if isinstance(stats, dict) else {}
+            for stat_key in provider_call_totals:
+                value = primary_stats.get(stat_key) if isinstance(primary_stats, dict) else None
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    provider_call_totals[stat_key] += value
+                    provider_stats_available = True
+
+        total_decisions = sum(source_totals.values())
+        fallback_count = source_totals["fallback_heuristic"]
         summaries[policy_id] = {
             "run_count": row["run_count"],
             "containment_success_rate": round(
@@ -228,6 +250,20 @@ def compare_providers(
                 for key, values in sorted(row["metrics"].items())
                 if values
             },
+            "decision_provenance": {
+                "source_counts": source_totals,
+                "total_decisions": total_decisions,
+                "fallback_decision_rate": round(fallback_count / total_decisions, 4) if total_decisions else 0.0,
+                "fallback_reason_counts": dict(sorted(fallback_reasons.items())),
+            },
+            "provider_stats": (
+                {
+                    "total_calls": int(provider_call_totals["calls"]),
+                    "total_failures": int(provider_call_totals["failures"]),
+                    "total_latency_seconds": round(provider_call_totals["total_latency_seconds"], 4),
+                }
+                if provider_stats_available else None
+            ),
         }
 
     paired_deltas: dict[str, dict[str, Any]] = {}
@@ -323,13 +359,96 @@ def compare_providers(
             "per_seed": comparisons,
         }
 
+    # The decision-quality question is whether a candidate improves on the
+    # scripted defender, not only on doing nothing. Keep raw paired deltas and
+    # omit containment-time arithmetic whenever either arm fails containment.
+    scripted_id = ScriptedDefensiveProvider.policy_id
+    scripted_by_seed = {
+        run["seed"]: run["metrics"]
+        for run in runs
+        if run["policy_id"] == scripted_id
+    }
+    paired_deltas_vs_scripted: dict[str, dict[str, Any]] = {}
+    for policy_id in summaries:
+        if policy_id == scripted_id:
+            continue
+        per_seed = []
+        metric_deltas_by_key: dict[str, list[float]] = {}
+        containment_success_deltas: list[float] = []
+        eligible_containment_pairs = 0
+        excluded_containment_pairs = 0
+        for run in runs:
+            if run["policy_id"] != policy_id or run["seed"] not in scripted_by_seed:
+                continue
+            candidate_metrics = run["metrics"]
+            scripted_metrics = scripted_by_seed[run["seed"]]
+            deltas: dict[str, float] = {}
+            for key, value in candidate_metrics.items():
+                reference_value = scripted_metrics.get(key)
+                if key == "time_to_containment_ticks":
+                    both_contained = (
+                        candidate_metrics.get("containment_achieved") is True
+                        and scripted_metrics.get("containment_achieved") is True
+                        and isinstance(value, (int, float)) and not isinstance(value, bool)
+                        and isinstance(reference_value, (int, float)) and not isinstance(reference_value, bool)
+                    )
+                    if both_contained:
+                        deltas[key] = round(value - reference_value, 4)
+                        eligible_containment_pairs += 1
+                    else:
+                        excluded_containment_pairs += 1
+                    continue
+                if (
+                    isinstance(value, (int, float)) and not isinstance(value, bool)
+                    and isinstance(reference_value, (int, float)) and not isinstance(reference_value, bool)
+                ):
+                    deltas[key] = round(value - reference_value, 4)
+            candidate_contained = candidate_metrics.get("containment_achieved") is True
+            scripted_contained = scripted_metrics.get("containment_achieved") is True
+            containment_delta = float(candidate_contained) - float(scripted_contained)
+            containment_success_deltas.append(containment_delta)
+            for metric_key, metric_delta in deltas.items():
+                metric_deltas_by_key.setdefault(metric_key, []).append(metric_delta)
+            per_seed.append({
+                "seed": run["seed"],
+                "candidate_containment_achieved": candidate_contained,
+                "scripted_containment_achieved": scripted_contained,
+                "containment_success_delta": int(containment_delta),
+                "delta_vs_scripted_defense": deltas,
+            })
+        if per_seed:
+            paired_deltas_vs_scripted[policy_id] = {
+                "baseline_policy_id": scripted_id,
+                "interpretation": {
+                    "raw_deltas": "candidate minus scripted defense; inspect each metric independently",
+                    "containment_success_rate": "positive is better",
+                    "harm_or_cost_metrics": "negative is generally better",
+                },
+                "aggregate_deltas": {
+                    "containment_success_rate_delta": round(
+                        sum(containment_success_deltas) / len(containment_success_deltas), 4
+                    ),
+                    "mean_metric_deltas": {
+                        key: round(sum(values) / len(values), 4)
+                        for key, values in sorted(metric_deltas_by_key.items()) if values
+                    },
+                },
+                "containment_time_pairing": {
+                    "eligible_pairs": eligible_containment_pairs,
+                    "excluded_pairs": excluded_containment_pairs,
+                    "rule": "Containment-time deltas require both candidate and scripted defense to achieve containment.",
+                },
+                "per_seed": per_seed,
+            }
+
     return {
-        "report_version": 2,
+        "report_version": 3,
         "scenario_id": (runs[0]["scenario_id"] if runs else SCENARIO_ID),
         "seeds": list(seeds),
         "max_ticks": max_ticks,
         "summaries": summaries,
         "paired_deltas_vs_do_nothing": paired_deltas,
+        "paired_deltas_vs_scripted_defense": paired_deltas_vs_scripted,
         "runs": runs,
     }
 

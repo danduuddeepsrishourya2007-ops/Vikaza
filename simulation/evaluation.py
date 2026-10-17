@@ -18,6 +18,7 @@ def summarize_world(
     has been isolated. A host compromised during the run is not part of that
     initial target set.
 
+    Hosts already isolated in the initial state count as contained at tick 0.
     If the initial target set is empty, containment is reported as unsuccessful
     with no containment time. This avoids treating an empty set as a successful
     containment outcome through vacuous truth.
@@ -74,20 +75,32 @@ def summarize_world(
         if host.is_compromised
     }
 
-    isolated_initial_compromises: set[str] = set()
+    initially_isolated_compromises = {
+        host.host_id
+        for host in (
+            initial_world.state.hosts.values()
+            if initial_world is not None
+            else []
+        )
+        if host.is_compromised and host.isolated
+    }
+    isolated_initial_compromises: set[str] = set(initially_isolated_compromises)
     containment_tick = None
 
     # Empty initial target sets do not count as successful containment.
     if initially_compromised:
-        for event in sorted(events, key=lambda item: (item.tick, item.event_id)):
-            if event.event_type == "HostIsolated":
-                host_id = event.payload.get("host_id")
-                if host_id in initially_compromised:
-                    isolated_initial_compromises.add(host_id)
+        if initially_compromised.issubset(isolated_initial_compromises):
+            containment_tick = 0
+        else:
+            for event in sorted(events, key=lambda item: (item.tick, item.event_id)):
+                if event.event_type == "HostIsolated":
+                    host_id = event.payload.get("host_id")
+                    if host_id in initially_compromised:
+                        isolated_initial_compromises.add(host_id)
 
-            if initially_compromised.issubset(isolated_initial_compromises):
-                containment_tick = event.tick
-                break
+                if initially_compromised.issubset(isolated_initial_compromises):
+                    containment_tick = event.tick
+                    break
 
     final_compromised_hosts = sum(
         1 for host in hosts if host.is_compromised

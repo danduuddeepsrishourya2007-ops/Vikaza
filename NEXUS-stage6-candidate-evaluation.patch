@@ -1,0 +1,330 @@
+--- a/simulation/experiment.py
++++ b/simulation/experiment.py
+@@ -208,6 +208,28 @@
+             )
+         ]
+ 
++        source_totals = {"llm": 0, "scripted": 0, "fallback_heuristic": 0}
++        fallback_reasons: dict[str, int] = {}
++        provider_call_totals = {"calls": 0, "failures": 0, "total_latency_seconds": 0.0}
++        provider_stats_available = False
++        for policy_run in policy_runs:
++            provenance = policy_run.get("decision_provenance", {})
++            for source, count in provenance.get("source_counts", {}).items():
++                if source in source_totals and isinstance(count, int) and not isinstance(count, bool):
++                    source_totals[source] += count
++            for reason, count in provenance.get("fallback_reason_counts", {}).items():
++                if isinstance(count, int) and not isinstance(count, bool):
++                    fallback_reasons[reason] = fallback_reasons.get(reason, 0) + count
++            stats = policy_run.get("provider_stats") or {}
++            primary_stats = stats.get("primary", {}) if isinstance(stats, dict) else {}
++            for stat_key in provider_call_totals:
++                value = primary_stats.get(stat_key) if isinstance(primary_stats, dict) else None
++                if isinstance(value, (int, float)) and not isinstance(value, bool):
++                    provider_call_totals[stat_key] += value
++                    provider_stats_available = True
++
++        total_decisions = sum(source_totals.values())
++        fallback_count = source_totals["fallback_heuristic"]
+         summaries[policy_id] = {
+             "run_count": row["run_count"],
+             "containment_success_rate": round(
+@@ -228,6 +250,20 @@
+                 for key, values in sorted(row["metrics"].items())
+                 if values
+             },
++            "decision_provenance": {
++                "source_counts": source_totals,
++                "total_decisions": total_decisions,
++                "fallback_decision_rate": round(fallback_count / total_decisions, 4) if total_decisions else 0.0,
++                "fallback_reason_counts": dict(sorted(fallback_reasons.items())),
++            },
++            "provider_stats": (
++                {
++                    "total_calls": int(provider_call_totals["calls"]),
++                    "total_failures": int(provider_call_totals["failures"]),
++                    "total_latency_seconds": round(provider_call_totals["total_latency_seconds"], 4),
++                }
++                if provider_stats_available else None
++            ),
+         }
+ 
+     paired_deltas: dict[str, dict[str, Any]] = {}
+@@ -323,13 +359,96 @@
+             "per_seed": comparisons,
+         }
+ 
++    # The decision-quality question is whether a candidate improves on the
++    # scripted defender, not only on doing nothing. Keep raw paired deltas and
++    # omit containment-time arithmetic whenever either arm fails containment.
++    scripted_id = ScriptedDefensiveProvider.policy_id
++    scripted_by_seed = {
++        run["seed"]: run["metrics"]
++        for run in runs
++        if run["policy_id"] == scripted_id
++    }
++    paired_deltas_vs_scripted: dict[str, dict[str, Any]] = {}
++    for policy_id in summaries:
++        if policy_id == scripted_id:
++            continue
++        per_seed = []
++        metric_deltas_by_key: dict[str, list[float]] = {}
++        containment_success_deltas: list[float] = []
++        eligible_containment_pairs = 0
++        excluded_containment_pairs = 0
++        for run in runs:
++            if run["policy_id"] != policy_id or run["seed"] not in scripted_by_seed:
++                continue
++            candidate_metrics = run["metrics"]
++            scripted_metrics = scripted_by_seed[run["seed"]]
++            deltas: dict[str, float] = {}
++            for key, value in candidate_metrics.items():
++                reference_value = scripted_metrics.get(key)
++                if key == "time_to_containment_ticks":
++                    both_contained = (
++                        candidate_metrics.get("containment_achieved") is True
++                        and scripted_metrics.get("containment_achieved") is True
++                        and isinstance(value, (int, float)) and not isinstance(value, bool)
++                        and isinstance(reference_value, (int, float)) and not isinstance(reference_value, bool)
++                    )
++                    if both_contained:
++                        deltas[key] = round(value - reference_value, 4)
++                        eligible_containment_pairs += 1
++                    else:
++                        excluded_containment_pairs += 1
++                    continue
++                if (
++                    isinstance(value, (int, float)) and not isinstance(value, bool)
++                    and isinstance(reference_value, (int, float)) and not isinstance(reference_value, bool)
++                ):
++                    deltas[key] = round(value - reference_value, 4)
++            candidate_contained = candidate_metrics.get("containment_achieved") is True
++            scripted_contained = scripted_metrics.get("containment_achieved") is True
++            containment_delta = float(candidate_contained) - float(scripted_contained)
++            containment_success_deltas.append(containment_delta)
++            for metric_key, metric_delta in deltas.items():
++                metric_deltas_by_key.setdefault(metric_key, []).append(metric_delta)
++            per_seed.append({
++                "seed": run["seed"],
++                "candidate_containment_achieved": candidate_contained,
++                "scripted_containment_achieved": scripted_contained,
++                "containment_success_delta": int(containment_delta),
++                "delta_vs_scripted_defense": deltas,
++            })
++        if per_seed:
++            paired_deltas_vs_scripted[policy_id] = {
++                "baseline_policy_id": scripted_id,
++                "interpretation": {
++                    "raw_deltas": "candidate minus scripted defense; inspect each metric independently",
++                    "containment_success_rate": "positive is better",
++                    "harm_or_cost_metrics": "negative is generally better",
++                },
++                "aggregate_deltas": {
++                    "containment_success_rate_delta": round(
++                        sum(containment_success_deltas) / len(containment_success_deltas), 4
++                    ),
++                    "mean_metric_deltas": {
++                        key: round(sum(values) / len(values), 4)
++                        for key, values in sorted(metric_deltas_by_key.items()) if values
++                    },
++                },
++                "containment_time_pairing": {
++                    "eligible_pairs": eligible_containment_pairs,
++                    "excluded_pairs": excluded_containment_pairs,
++                    "rule": "Containment-time deltas require both candidate and scripted defense to achieve containment.",
++                },
++                "per_seed": per_seed,
++            }
++
+     return {
+-        "report_version": 2,
++        "report_version": 3,
+         "scenario_id": (runs[0]["scenario_id"] if runs else SCENARIO_ID),
+         "seeds": list(seeds),
+         "max_ticks": max_ticks,
+         "summaries": summaries,
+         "paired_deltas_vs_do_nothing": paired_deltas,
++        "paired_deltas_vs_scripted_defense": paired_deltas_vs_scripted,
+         "runs": runs,
+     }
+ 
+--- a/tests/test_experiment.py
++++ b/tests/test_experiment.py
+@@ -142,7 +142,7 @@
+         max_ticks=5,
+     )
+ 
+-    assert report["report_version"] == 2
++    assert report["report_version"] == 3
+     paired = report["paired_deltas_vs_do_nothing"][
+         ScriptedDefensiveProvider.policy_id
+     ]
+@@ -290,3 +290,104 @@
+     assert metrics["final_services_available"] == metrics["total_services"] - 1
+     assert metrics["final_services_down"] == 1
+     assert metrics["service_availability_fraction"] < 1.0
++
++
++def test_initially_isolated_compromised_host_counts_as_contained_at_tick_zero():
++    from scenarios.cyber_containment import build_initial_world
++    from simulation.evaluation import summarize_world
++
++    world = build_initial_world(73)
++    initial_world = build_initial_world(73)
++    target_id = next(
++        host.host_id for host in initial_world.state.hosts.values()
++        if host.is_compromised
++    )
++    initial_world.state.hosts[target_id].isolated = True
++    world.state.hosts[target_id].isolated = True
++
++    metrics = summarize_world(
++        world,
++        dict(world.state.resource_pool),
++        initial_world=initial_world,
++        decisions_proposed=0,
++    )
++
++    assert metrics["containment_achieved"] is True
++    assert metrics["time_to_containment_ticks"] == 0
++
++
++def test_stage6_comparison_reports_paired_candidate_deltas_vs_scripted_defense():
++    report = compare_providers(
++        [
++            (DoNothingProvider.policy_id, DoNothingProvider),
++            (ScriptedDefensiveProvider.policy_id, ScriptedDefensiveProvider),
++        ],
++        seeds=[7, 17, 31],
++        max_ticks=7,
++        world_factory=__import__("simulation.experiment", fromlist=["configured_attack_world"]).configured_attack_world,
++    )
++
++    assert report["report_version"] == 3
++    paired = report["paired_deltas_vs_scripted_defense"][DoNothingProvider.policy_id]
++    assert paired["baseline_policy_id"] == ScriptedDefensiveProvider.policy_id
++    assert [row["seed"] for row in paired["per_seed"]] == [7, 17, 31]
++    assert paired["aggregate_deltas"]["containment_success_rate_delta"] == -1.0
++    assert all(row["candidate_containment_achieved"] is False for row in paired["per_seed"])
++    assert all(row["scripted_containment_achieved"] is True for row in paired["per_seed"])
++    assert all("time_to_containment_ticks" not in row["delta_vs_scripted_defense"] for row in paired["per_seed"])
++    assert paired["containment_time_pairing"]["excluded_pairs"] == 3
++
++
++def test_stage6_scripted_defense_comparison_has_zero_paired_deltas():
++    report = compare_providers(
++        [
++            (DoNothingProvider.policy_id, DoNothingProvider),
++            (ScriptedDefensiveProvider.policy_id, ScriptedDefensiveProvider),
++            ("scripted_clone_test", ScriptedDefensiveProvider),
++        ],
++        seeds=[7, 17],
++        max_ticks=7,
++        world_factory=__import__("simulation.experiment", fromlist=["configured_attack_world"]).configured_attack_world,
++    )
++
++    paired = report["paired_deltas_vs_scripted_defense"]["scripted_clone_test"]
++    assert paired["aggregate_deltas"]["containment_success_rate_delta"] == 0.0
++    assert all(
++        all(value == 0.0 for value in row["delta_vs_scripted_defense"].values())
++        for row in paired["per_seed"]
++    )
++
++
++def test_stage6_summary_aggregates_llm_fallback_provenance_and_provider_stats():
++    from simulation.llm_provider import FallbackProvider, OpenAICompatibleProvider, ProviderError
++
++    def unavailable_transport(*args):
++        raise ProviderError("offline test", category="network_error")
++
++    def candidate_factory():
++        primary = OpenAICompatibleProvider(
++            "http://localhost:8000/v1",
++            "offline-test",
++            transport=unavailable_transport,
++        )
++        return FallbackProvider(primary, ScriptedDefensiveProvider())
++
++    report = compare_providers(
++        [
++            (DoNothingProvider.policy_id, DoNothingProvider),
++            (ScriptedDefensiveProvider.policy_id, ScriptedDefensiveProvider),
++            ("candidate_llm_with_fallback_test", candidate_factory),
++        ],
++        seeds=[7],
++        max_ticks=2,
++    )
++
++    summary = report["summaries"]["candidate_llm_with_fallback_test"]
++    provenance = summary["decision_provenance"]
++    assert provenance["source_counts"]["fallback_heuristic"] > 0
++    assert provenance["source_counts"]["llm"] == 0
++    assert provenance["fallback_decision_rate"] > 0
++    assert provenance["fallback_reason_counts"]["network_error"] > 0
++    assert summary["provider_stats"]["total_calls"] == 4
++    assert summary["provider_stats"]["total_failures"] == 4
++    assert report["paired_deltas_vs_scripted_defense"]["candidate_llm_with_fallback_test"]
+--- /dev/null
++++ b/STAGE6_CANDIDATE_AI_EVALUATION.md
+@@ -0,0 +1,61 @@
++# NEXUS Stage 6 — Candidate AI Decision Quality
++
++## Status
++
++**The evaluation harness is implemented and tested. A genuine LLM-vs-scripted result is not yet available.** This workspace has no `NEXUS_LLM_BASE_URL` or `NEXUS_LLM_MODEL` configured, so I did not substitute a mock model or describe fallback decisions as LLM decisions.
++
++The experiment runner now reports paired, per-seed deltas for every candidate against `scripted_defensive_v1`, alongside the existing deltas against `do_nothing_v1`. It also aggregates decision-source counts, fallback rate/reasons, and model-provider call/failure/latency counters. Containment-time deltas are omitted unless both policies achieve containment on the same seed.
++
++## Baseline results (measured)
++
++Artifact: [`artifacts/nexus-stage6-baselines.json`](artifacts/nexus-stage6-baselines.json)
++
++Scenario: `active_attack`, 7 ticks, seeds `7, 17, 31, 71, 101`.
++
++| Metric | Do nothing | Scripted defense |
++|---|---:|---:|
++| Containment success | 0/5 (0%) | 5/5 (100%) |
++| Mean final compromised hosts | 3.0 | 0.0 |
++| Mean exfiltrated data | 50 GB | 0 GB |
++| Mean final services down | 1.0 | 0.0 |
++| Mean service availability fraction | 0.75 | 1.0 |
++| Mean analyst-hours used | 0.0 | 7.0 |
++| Mean time to containment when achieved | Not achieved | Tick 0 |
++
++These are outcomes of NEXUS's defined in-memory scenario, not estimates of real-world incident rates. The scripted policy is a strong baseline; the AI policy must be evaluated against it, not merely against doing nothing.
++
++## Run the real candidate model
++
++Start an OpenAI-compatible inference endpoint, then configure its address and model in PowerShell. Example values below are placeholders; use your actual endpoint/model:
++
++```powershell
++$env:NEXUS_LLM_BASE_URL = "http://127.0.0.1:8000/v1"
++$env:NEXUS_LLM_MODEL = "YOUR_MODEL_ID"
++# Optional, only if the endpoint requires a key:
++$env:NEXUS_LLM_API_KEY = "YOUR_API_KEY"
++
++python -m simulation.cli `
++  --mode active_attack `
++  --seeds 7,17,31,71,101 `
++  --ticks 7 `
++  --with-llm `
++  --timeout 8 `
++  --output artifacts/nexus-stage6-candidate.json
++```
++
++Do not commit API keys or endpoint credentials. The provider does not include credentials or response bodies in experiment diagnostics.
++
++## Interpretation rules
++
++1. Compare the candidate's `paired_deltas_vs_scripted_defense` entries for the same seeds.
++2. Inspect each outcome independently: containment, compromised hosts, exfiltration, service availability, and analyst-hours. There is no weighted scalar score.
++3. A candidate run that has any `fallback_heuristic` decisions is a mixed LLM/fallback run, not a pure LLM run. Check `decision_provenance` at both run and summary level.
++4. Claim improvement only when the measured outcomes support it across the paired seeds. Five seeds are an initial evaluation set, not broad statistical evidence.
++5. This scenario models whole-store exfiltration; it does not measure partial bytes transferred or duration-weighted outage service-ticks.
++
++## Verification performed in this workspace
++
++- `python -m pytest -q`: **166 passed**.
++- Active-attack baseline experiment completed for all five seeds and both baseline policies.
++- The candidate LLM arm was not executed because no endpoint/model configuration was available.
++- This uploaded snapshot has no `.git` directory or configured remote, so these changes have not been committed or pushed to GitHub.
