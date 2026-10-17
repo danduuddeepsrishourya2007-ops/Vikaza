@@ -147,3 +147,39 @@ def test_http_error_body_classifies_exhausted_quota_without_leaking_raw_message(
     assert caught.value.status_code == 429
     assert "credit_balance_exhausted" in str(caught.value)
     assert "private billing detail" not in str(caught.value)
+
+
+def test_rate_limit_is_recoverable_and_does_not_open_circuit():
+    calls = []
+
+    def limited_transport(*args):
+        calls.append(args[0])
+        raise ProviderError("temporarily rate limited", category="rate_limited", status_code=429)
+
+    primary = OpenAICompatibleProvider(
+        "http://localhost:8000/v1", "test-model", transport=limited_transport,
+    )
+    provider = FallbackProvider(primary, ScriptedDefensiveProvider())
+    view = observe(configured_world(), "security_engineer_1")
+
+    first = provider.decide(view)
+    second = provider.decide(view)
+
+    assert first.source == second.source == "fallback_heuristic"
+    assert first.failure_reason == second.failure_reason == "rate_limited"
+    assert len(calls) == 2
+    assert provider.stats.circuit_open is False
+
+
+def test_unknown_action_error_does_not_echo_untrusted_action_text():
+    secret_like_text = "do-not-echo-this-value"
+    provider = OpenAICompatibleProvider(
+        "http://localhost:8000/v1", "test-model",
+        transport=lambda *args: response(
+            '{"action_type":"' + secret_like_text + '","target":null,"rationale":"bad"}'
+        ),
+    )
+    with pytest.raises(ProviderError) as caught:
+        provider.decide(observe(configured_world(), "security_engineer_1"))
+    assert caught.value.category == "unknown_action"
+    assert secret_like_text not in str(caught.value)

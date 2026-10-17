@@ -102,7 +102,7 @@ def world_snapshot(world: World) -> dict[str, Any]:
 
 
 def decision_to_dict(decision: AgentDecision) -> dict[str, Any]:
-    return {
+    result = {
         "agent_id": decision.agent_id,
         "tick": decision.tick,
         "action_type": decision.action_type.value,
@@ -110,29 +110,64 @@ def decision_to_dict(decision: AgentDecision) -> dict[str, Any]:
         "rationale": decision.rationale,
         "source": decision.source,
     }
+    if decision.failure_reason is not None:
+        result["failure_reason"] = decision.failure_reason
+    return result
 
 
 def decision_from_dict(data: Any) -> AgentDecision:
     if not isinstance(data, dict):
         raise TraceError("Each recorded decision must be an object")
+
     required = {"agent_id", "tick", "action_type", "target", "rationale", "source"}
+    allowed = required | {"failure_reason"}
+
     if not required.issubset(data):
         raise TraceError(f"Decision is missing fields: {sorted(required - set(data))}")
-    try:
-        if not isinstance(data["tick"], int) or isinstance(data["tick"], bool) or data["tick"] < 0:
-            raise TraceError("Decision tick must be a non-negative integer")
-        return AgentDecision(
-            agent_id=str(data["agent_id"]),
-            tick=data["tick"],
-            action_type=ActionType(data["action_type"]),
-            target=data["target"],
-            rationale=str(data["rationale"]),
-            source=data["source"],
+    if set(data) - allowed:
+        raise TraceError(f"Decision contains unsupported fields: {sorted(set(data) - allowed)}")
+
+    if not isinstance(data["source"], str) or data["source"] not in {
+        "scripted", "fallback_heuristic", "llm"
+    }:
+        raise TraceError(
+            "Decision source must be scripted, fallback_heuristic, or llm"
         )
-    except (ValueError, TypeError, KeyError) as exc:
-        if isinstance(exc, TraceError):
-            raise
-        raise TraceError(f"Invalid recorded decision: {exc}") from exc
+
+    try:
+        action_type = ActionType(data["action_type"])
+    except (ValueError, TypeError) as exc:
+        raise TraceError(f"Invalid recorded decision action_type: {exc}") from exc
+
+    if not isinstance(data["agent_id"], str) or not data["agent_id"].strip() or len(data["agent_id"]) > 128:
+        raise TraceError("Decision agent_id must be a non-empty string of at most 128 characters")
+    if not isinstance(data["rationale"], str) or len(data["rationale"]) > 500:
+        raise TraceError("Decision rationale must be a string of at most 500 characters")
+    if data["target"] is not None and (
+        not isinstance(data["target"], str)
+        or not data["target"].strip()
+        or len(data["target"]) > 256
+    ):
+        raise TraceError("Decision target must be null or a non-empty string of at most 256 characters")
+    if data.get("failure_reason") is not None and (
+        not isinstance(data["failure_reason"], str)
+        or len(data["failure_reason"]) > 128
+    ):
+        raise TraceError("Decision failure_reason must be null or a string of at most 128 characters")
+    if not isinstance(data["tick"], int) or isinstance(data["tick"], bool) or data["tick"] < 0:
+        raise TraceError("Decision tick must be a non-negative integer")
+    if action_type == ActionType.NO_OP and data["target"] is not None:
+        raise TraceError("NO_OP target must be null")
+
+    return AgentDecision(
+        agent_id=data["agent_id"],
+        tick=data["tick"],
+        action_type=action_type,
+        target=data["target"],
+        rationale=data["rationale"],
+        source=data["source"],
+        failure_reason=data.get("failure_reason"),
+    )
 
 
 @dataclass

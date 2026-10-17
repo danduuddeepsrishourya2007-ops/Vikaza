@@ -37,6 +37,7 @@ class ScriptedProvider:
             target=decision.target,
             rationale=decision.rationale,
             source=decision.source,
+            failure_reason=decision.failure_reason,
         )
 
 

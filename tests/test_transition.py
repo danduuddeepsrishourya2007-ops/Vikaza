@@ -332,3 +332,9 @@ def test_connection_target_requires_two_hosts():
     assert failure == (
         "BLOCK_CONNECTION target must be 'host_a,host_b'"
     )
+
+
+def test_connection_target_with_more_than_one_comma_is_rejected():
+    world = make_world()
+    decision = make_decision(ActionType.BLOCK_CONNECTION, "host_a,host_b,host_c")
+    assert precondition_failure(world, decision) == "BLOCK_CONNECTION target must be 'host_a,host_b'"

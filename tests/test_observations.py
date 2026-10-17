@@ -113,3 +113,83 @@ def test_provider_invalid_action_is_rejected_by_engine_not_applied_directly():
     run_provider_tick(world, provider)
     assert world.state.data_stores["customer_records"].is_exfiltrated is False
     assert any(e.event_type == "AgentActionRejected" for e in world.state.events)
+
+
+def test_engine_rejects_stale_decision_without_mutating_authoritative_state():
+    from copy import deepcopy
+
+    world = configured_world()
+    decision = AgentDecision(
+        "security_engineer_1", 1, ActionType.ISOLATE_HOST,
+        "developer_workstation", "stale proposal", "llm",
+    )
+    hosts_before = deepcopy(world.state.hosts)
+    resources_before = deepcopy(world.state.resource_pool)
+    agents_before = deepcopy(world.state.agents)
+    stores_before = deepcopy(world.state.data_stores)
+
+    world.apply_decisions([decision])
+
+    assert world.state.hosts == hosts_before
+    assert world.state.resource_pool == resources_before
+    assert world.state.agents == agents_before
+    assert world.state.data_stores == stores_before
+    rejection = [e for e in world.state.events if e.event_type == "AgentActionRejected"]
+    assert len(rejection) == 1
+    assert "tick" in rejection[0].payload["reason"].lower()
+    assert rejection[0].payload["source"] == "llm"
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value", "expected_reason"),
+    [
+        ("action_type", "ISOLATE_HOST", "recognized ActionType"),
+        ("target", 42, "target must be null or a non-empty string"),
+        ("target", "x" * 257, "target must be null or a non-empty string"),
+        ("rationale", "r" * 501, "rationale must be a string"),
+    ],
+)
+def test_engine_rejects_malformed_decision_before_sorting_or_execution(field, bad_value, expected_reason):
+    from copy import deepcopy
+
+    world = configured_world()
+    decision = AgentDecision(
+        "security_engineer_1", 0, ActionType.ISOLATE_HOST,
+        "developer_workstation", "valid shape", "llm",
+    )
+    setattr(decision, field, bad_value)
+    hosts_before = deepcopy(world.state.hosts)
+    resources_before = deepcopy(world.state.resource_pool)
+
+    world.apply_decisions([decision])
+
+    assert world.state.hosts == hosts_before
+    assert world.state.resource_pool == resources_before
+    rejected = [e for e in world.state.events if e.event_type == "AgentActionRejected"]
+    assert len(rejected) == 1
+    assert expected_reason in rejected[0].payload["reason"]
+
+
+def test_engine_rejects_unhashable_source_without_crashing():
+    world = configured_world()
+    decision = AgentDecision(
+        "security_engineer_1", 0, ActionType.ISOLATE_HOST,
+        "developer_workstation", "mutated source", "llm",
+    )
+    decision.source = ["llm"]
+    world.apply_decisions([decision])
+    rejected = [e for e in world.state.events if e.event_type == "AgentActionRejected"]
+    assert len(rejected) == 1
+    assert "source must be" in rejected[0].payload["reason"]
+
+
+def test_engine_rejects_no_op_with_target():
+    world = configured_world()
+    decision = AgentDecision(
+        "security_engineer_1", 0, ActionType.NO_OP,
+        "developer_workstation", "malformed no-op", "llm",
+    )
+    world.apply_decisions([decision])
+    rejected = [e for e in world.state.events if e.event_type == "AgentActionRejected"]
+    assert len(rejected) == 1
+    assert rejected[0].payload["reason"] == "NO_OP target must be null"

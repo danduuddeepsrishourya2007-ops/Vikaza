@@ -19,10 +19,12 @@ def configured_world(seed: int):
 def evaluate_provider(provider, policy_id: str, seed: int = 7, max_ticks: int = 5,
                       verify_replay: bool = True) -> dict[str, Any]:
     """Run one provider with a fixed seed and return trace plus measured outcomes."""
-    if not policy_id.strip():
-        raise ValueError("policy_id must not be empty")
-    if max_ticks < 1:
-        raise ValueError("max_ticks must be positive")
+    if not isinstance(policy_id, str) or not policy_id.strip():
+        raise ValueError("policy_id must be a non-empty string")
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise ValueError("seed must be an integer")
+    if not isinstance(max_ticks, int) or isinstance(max_ticks, bool) or max_ticks < 1:
+        raise ValueError("max_ticks must be a positive integer")
     world = configured_world(seed)
     initial_resources = dict(world.state.resource_pool)
     trace = run_and_record(world, provider, policy_id, max_ticks=max_ticks)
@@ -30,6 +32,16 @@ def evaluate_provider(provider, policy_id: str, seed: int = 7, max_ticks: int = 
         final_world = replay_trace(trace.to_json(), configured_world)
     else:
         final_world = world
+    decision_sources = {"llm": 0, "scripted": 0, "fallback_heuristic": 0}
+    fallback_reasons: dict[str, int] = {}
+    for tick_decisions in trace.decisions_by_tick:
+        for decision in tick_decisions:
+            source = decision.get("source")
+            if source in decision_sources:
+                decision_sources[source] += 1
+            if source == "fallback_heuristic":
+                reason = decision.get("failure_reason") or "unspecified"
+                fallback_reasons[reason] = fallback_reasons.get(reason, 0) + 1
     return {
         "policy_id": policy_id,
         "scenario_id": SCENARIO_ID,
@@ -39,6 +51,10 @@ def evaluate_provider(provider, policy_id: str, seed: int = 7, max_ticks: int = 
         "replay_verified": verify_replay,
         "trace": trace.to_dict(),
         "provider_stats": _provider_stats(provider),
+        "decision_provenance": {
+            "source_counts": decision_sources,
+            "fallback_reason_counts": dict(sorted(fallback_reasons.items())),
+        },
     }
 
 
@@ -49,6 +65,12 @@ def compare_providers(providers: list[tuple[str, Callable[[], Any]]], seeds: lis
         raise ValueError("at least one provider is required")
     if not seeds:
         raise ValueError("at least one seed is required")
+    if not isinstance(max_ticks, int) or isinstance(max_ticks, bool) or max_ticks < 1:
+        raise ValueError("max_ticks must be a positive integer")
+    if any(not isinstance(seed, int) or isinstance(seed, bool) for seed in seeds):
+        raise ValueError("all seeds must be integers")
+    if any(not isinstance(policy_id, str) or not policy_id.strip() or not callable(factory) for policy_id, factory in providers):
+        raise ValueError("each provider must have a non-empty policy_id and callable factory")
     if len(set(seeds)) != len(seeds):
         raise ValueError("seeds must be unique")
     runs = []

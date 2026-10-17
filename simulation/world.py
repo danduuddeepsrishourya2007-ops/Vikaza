@@ -370,26 +370,67 @@ class World:
     # Decision pipeline
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _decision_shape_failure(decision: Any, current_tick: int) -> Optional[str]:
+        """Validate untrusted decision structure before sorting or execution."""
+        if not isinstance(decision, AgentDecision):
+            return "Decision must be an AgentDecision instance"
+        if not isinstance(decision.agent_id, str) or not decision.agent_id.strip() or len(decision.agent_id) > 128:
+            return "agent_id must be a non-empty string of at most 128 characters"
+        if not isinstance(decision.tick, int) or isinstance(decision.tick, bool) or decision.tick < 0:
+            return "tick must be a non-negative integer"
+        if decision.tick != current_tick:
+            return f"Stale or future decision tick {decision.tick}; current tick is {current_tick}"
+        if not isinstance(decision.action_type, ActionType):
+            return "action_type must be a recognized ActionType"
+        if decision.action_type == ActionType.NO_OP and decision.target is not None:
+            return "NO_OP target must be null"
+        if decision.target is not None and (
+            not isinstance(decision.target, str)
+            or not decision.target.strip()
+            or len(decision.target) > 256
+        ):
+            return "target must be null or a non-empty string of at most 256 characters"
+        if not isinstance(decision.rationale, str) or len(decision.rationale) > 500:
+            return "rationale must be a string of at most 500 characters"
+        if not isinstance(decision.source, str) or decision.source not in {"scripted", "fallback_heuristic", "llm"}:
+            return "source must be scripted, fallback_heuristic, or llm"
+        if decision.failure_reason is not None and (
+            not isinstance(decision.failure_reason, str) or len(decision.failure_reason) > 128
+        ):
+            return "failure_reason must be null or a string of at most 128 characters"
+        return None
+
     def apply_decisions(
         self,
         decisions: List[AgentDecision],
     ) -> List[AgentActionTaken]:
-        """
-        Apply agent decisions sequentially in deterministic order.
-        """
+        """Validate and apply proposals in deterministic order.
 
+        Structurally invalid or stale proposals are rejected before ordering,
+        preventing malformed values from crashing the scheduler or reaching a
+        transition. Rejection events are the only intended state change for a
+        rejected proposal.
+        """
         policy = self.state.active_policy
-
         if not policy:
             return []
 
         actions_taken: List[AgentActionTaken] = []
         seen_agents: Set[str] = set()
+        valid_decisions: List[AgentDecision] = []
+
+        for decision in decisions:
+            shape_failure = self._decision_shape_failure(decision, self.state.tick)
+            if shape_failure:
+                self._record_rejection(decision, shape_failure)
+            else:
+                valid_decisions.append(decision)
 
         for decision in order_decisions(
             policy,
             self.state,
-            decisions,
+            valid_decisions,
         ):
 
             if decision.agent_id in seen_agents:
@@ -445,20 +486,35 @@ class World:
 
     def _record_rejection(
         self,
-        decision: AgentDecision,
+        decision: Any,
         reason: Optional[str],
     ) -> None:
-        """Record a rejected decision."""
+        """Record a rejection without trusting malformed decision fields."""
+        raw_agent_id = getattr(decision, "agent_id", None)
+        agent_id = raw_agent_id if isinstance(raw_agent_id, str) and raw_agent_id.strip() else None
+        raw_action = getattr(decision, "action_type", None)
+        action_name = raw_action.value if isinstance(raw_action, ActionType) else f"<invalid:{type(raw_action).__name__}>"
+        raw_target = getattr(decision, "target", None)
+        target = raw_target if raw_target is None or isinstance(raw_target, str) else f"<invalid:{type(raw_target).__name__}>"
+        source = getattr(decision, "source", None)
+        if not isinstance(source, str) or source not in {"scripted", "fallback_heuristic", "llm"}:
+            source = "unknown"
+        failure_reason = getattr(decision, "failure_reason", None)
+        if not isinstance(failure_reason, str):
+            failure_reason = None
 
+        tags = [f"agent:{agent_id}"] if agent_id else []
         self.emit_event(
             "AgentActionRejected",
-            decision.agent_id,
+            agent_id,
             {
-                "action_type": decision.action_type.value,
-                "target": decision.target,
-                "reason": reason or "unspecified",
+                "action_type": action_name,
+                "target": target,
+                "source": source,
+                "failure_reason": failure_reason,
+                "reason": (reason or "unspecified")[:300],
             },
-            [f"agent:{decision.agent_id}"],
+            tags,
         )
 
     def _has_effect_implementation(

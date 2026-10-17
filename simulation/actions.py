@@ -57,6 +57,7 @@ class AgentDecision:
     target: Optional[str]
     rationale: str
     source: str
+    failure_reason: Optional[str] = None
 
     def __post_init__(self):
         """Validate the decision after initialization."""

@@ -226,11 +226,11 @@ class OpenAICompatibleProvider:
             try:
                 action = ActionType(raw_action)
             except (ValueError, TypeError) as exc:
-                raise ProviderError(f"LLM returned unknown action_type {raw_action!r}", category="invalid_decision") from exc
+                raise ProviderError("LLM returned an unknown action_type", category="unknown_action") from exc
             target = content.get("target")
             rationale = content.get("rationale")
-            if target is not None and (not isinstance(target, str) or not target.strip()):
-                raise ProviderError("LLM target must be a non-empty string or null", category="invalid_decision")
+            if target is not None and (not isinstance(target, str) or not target.strip() or len(target) > 256):
+                raise ProviderError("LLM target must be a non-empty string of at most 256 characters or null", category="invalid_decision")
             if not isinstance(rationale, str):
                 raise ProviderError("LLM rationale must be a string", category="invalid_decision")
             # Bound model-supplied text before it enters the event log.
@@ -275,7 +275,7 @@ class FallbackProvider:
     # account changes. Stop making billable requests for the rest of this run.
     _CIRCUIT_OPEN_CATEGORIES = {
         "quota_exhausted", "authentication_error", "permission_error",
-        "rate_limited", "invalid_request", "endpoint_or_model_not_found",
+        "invalid_request", "endpoint_or_model_not_found",
     }
 
     def __init__(self, primary, fallback=None) -> None:
@@ -310,4 +310,5 @@ class FallbackProvider:
             target=decision.target,
             rationale=(f"Fallback after provider failure ({reason}): " + decision.rationale)[:500],
             source="fallback_heuristic",
+            failure_reason=reason[:128],
         )

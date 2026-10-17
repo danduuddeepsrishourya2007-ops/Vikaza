@@ -130,7 +130,7 @@ def _split_connection_target(
 ) -> Optional[Tuple[str, str]]:
     """Parse a connection target encoded as 'host_a,host_b'."""
 
-    if not target or "," not in target:
+    if not target or target.count(",") != 1:
         return None
 
     host_a, host_b = target.split(

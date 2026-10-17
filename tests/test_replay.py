@@ -133,3 +133,74 @@ def test_replay_validates_manually_constructed_trace_objects():
 
     with pytest.raises(TraceError, match="exactly max_ticks"):
         replay_trace(trace, build_evaluation_world)
+
+
+def test_decision_trace_round_trips_structured_fallback_reason():
+    from simulation.actions import ActionType, AgentDecision
+    from simulation.replay import decision_from_dict, decision_to_dict
+
+    decision = AgentDecision(
+        agent_id="security_engineer_1",
+        tick=0,
+        action_type=ActionType.NO_OP,
+        target=None,
+        rationale="Fallback after provider failure",
+        source="fallback_heuristic",
+        failure_reason="quota_exhausted",
+    )
+    encoded = decision_to_dict(decision)
+    restored = decision_from_dict(encoded)
+    assert encoded["failure_reason"] == "quota_exhausted"
+    assert restored == decision
+
+
+def test_decision_trace_rejects_unsupported_source():
+    from simulation.replay import decision_from_dict
+
+    data = {
+        "agent_id": "security_engineer_1",
+        "tick": 0,
+        "action_type": "NO_OP",
+        "target": None,
+        "rationale": "No action",
+        "source": "untrusted_source",
+    }
+
+    with pytest.raises(TraceError, match="Decision source"):
+        decision_from_dict(data)
+
+
+def test_decision_trace_rejects_no_op_with_target():
+    from simulation.replay import decision_from_dict
+
+    data = {
+        "agent_id": "security_engineer_1",
+        "tick": 0,
+        "action_type": "NO_OP",
+        "target": "host_a",
+        "rationale": "No action",
+        "source": "scripted",
+    }
+
+    with pytest.raises(TraceError, match="NO_OP target must be null"):
+        decision_from_dict(data)
+
+
+def test_decision_trace_accepts_legacy_entry_without_failure_reason():
+    from simulation.actions import ActionType
+    from simulation.replay import decision_from_dict
+
+    data = {
+        "agent_id": "security_engineer_1",
+        "tick": 0,
+        "action_type": "NO_OP",
+        "target": None,
+        "rationale": "No action",
+        "source": "scripted",
+    }
+
+    restored = decision_from_dict(data)
+
+    assert restored.action_type == ActionType.NO_OP
+    assert restored.source == "scripted"
+    assert restored.failure_reason is None
