@@ -1,217 +1,356 @@
-NEXUS — Cyber Incident Simulation & Evaluation
-NEXUS is a reproducible cyber-incident simulation and decision-evaluation prototype. It lets you run controlled containment and simulated-attack scenarios, compare defensive policies on the same seeds, inspect recorded decisions and events, and optionally evaluate decisions proposed by a local LLM.
-Design principle: the Python simulation engine owns the authoritative world state. Decision providers propose actions; the engine validates and applies them. An LLM is optional and never directly mutates simulation state.
+# NEXUS — Cyber Simulation & Decision Evaluation
 
-NEXUS is a research/demo prototype. It does not connect to real hosts, perform live penetration testing, or predict real-world incidents.
-What you can do
-- Run deterministic cyber-containment and active simulated-attack scenarios.
-- Compare do_nothing_v1, scripted_defensive_v1, and (optionally) an OpenAI-compatible LLM provider with fallback behavior.
-- Repeat experiments across explicit seeds and tick limits.
-- Inspect hosts, services, data stores, resources, decisions, events, and state-derived outcome metrics.
-- Verify replay behavior and run automated tests.
-- Use the local browser dashboard and HTTP API.
-- Run deterministic engine benchmarks, workload-scaling benchmarks, and state-changing scaling benchmarks.
-- Export experiment and benchmark reports as JSON, with a Markdown comparison report for benchmark comparisons.
-Quick start — Windows PowerShell
-Run these commands from the repository root (C:\Users\dandu\NEXUS in the original development setup):
-cd C:\Users\dandu\NEXUS
+**NEXUS** is a cyber simulation platform that lets organizations evaluate security decisions in a controlled, repeatable environment before applying them in the real world.
 
-# Activate the existing environment
-.\.venv\Scripts\Activate.ps1
+It models cyber incidents, attacker and defender actions, system availability, resource constraints, and incident outcomes. It supports deterministic baselines and LLM-driven decisions so their behavior can be compared using measurable simulation results.
 
-# Install dependencies (the simulation uses Python's standard library;
-# pytest is needed for the test suite)
-python -m pip install -r requirements.txt
+> **Core principle:** The simulation engine is authoritative. AI proposes decisions; the engine validates and applies them.
 
-# Run all tests
-python -m pytest -q
+## Table of Contents
 
-# Run the default deterministic containment comparison
-python -m simulation.cli --seeds 7,17,42 --ticks 5 --output artifacts/nexus-evaluation.json
-If you do not have a virtual environment yet, create it first:
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-The default evaluation does not require Ollama, an API key, or a GPU.
-Run NEXUS in the browser
-NEXUS includes a local dashboard served by a Python standard-library HTTP server. From the repository root:
-python -m backend.api.main
-Open http://127.0.0.1:8765. Stop the server with Ctrl+C.
-To use another local port:
-$env:NEXUS_PORT = "8766"
-python -m backend.api.main
-The dashboard provides two modes:
-- Containment: compares the do-nothing and scripted-defensive baselines.
-- Active simulated attack: runs a deterministic, in-memory attack sequence through the simulated topology and measures whether defensive actions interrupt it.
-The dashboard currently runs deterministic baseline comparisons; it does not call the optional LLM provider. Use the CLI below for model-backed evaluation.
-Local API routes
-Method and route	Purpose
-GET /api/health	Health check and scenario identifier
-GET /api/scenario	Initial scenario topology, hosts, services, data stores, agents, and resources
-POST /api/run	Run a seeded baseline comparison and return the evaluation report
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+- [Project Structure](#project-structure)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Running the LLM](#running-the-llm)
+- [Simulation Modes](#simulation-modes)
+- [Evaluation and Benchmarks](#evaluation-and-benchmarks)
+- [Tests](#tests)
+- [Understanding Results](#understanding-results)
+- [Documentation](#documentation)
+- [Limitations](#limitations)
 
+## Key Features
 
-Example JSON body for POST /api/run:
-{
-  "seeds": [7, 17, 42],
-  "ticks": 5,
-  "mode": "containment"
-}
-Set mode to active_attack to select the active-attack scenario. The API accepts 1–20 unique non-negative integer seeds and 1–100 ticks per request.
-Security note: the API has no authentication and is intended for localhost development only. Do not expose it to an untrusted network.
-Run an evaluation from the CLI
-1. Baseline comparison (no LLM)
-python -m simulation.cli --seeds 7,17,42 --ticks 5 --output artifacts/nexus-baseline-evaluation.json
-By default, the CLI runs the containment scenario and compares the do-nothing and scripted-defensive baselines.
-2. Active simulated attack (no LLM)
-python -m simulation.cli --mode active_attack --seeds 7,17,42 --ticks 7 --output artifacts/nexus-active-attack-evaluation.json
-This mode models an attacker as a deterministic in-memory sequence. It does not send traffic to real hosts or networks. Use enough ticks for the configured attack sequence; seven or more ticks are suggested for the full sequence.
-CLI options
-Option	Description	Default
---mode	containment or active_attack	containment
---seeds	Comma-separated unique integer seeds	7,17,42
---ticks	Maximum ticks per run; must be positive	5
---output	Path for the JSON report	artifacts/nexus-evaluation.json
---with-llm	Add the configured OpenAI-compatible LLM provider	Off
---timeout	Per-decision request timeout in seconds	8
+- **Deterministic simulation:** Reproducible scenarios using controlled seeds and simulation state transitions.
+- **Cyber incident scenarios:** Containment and active-attack simulation modes.
+- **Multiple decision providers:** Do-nothing, scripted defensive, and LLM-driven strategies.
+- **LLM integration:** Supports a locally hosted model through an OpenAI-compatible API, including Ollama.
+- **Action validation:** Proposed actions are checked against role permissions and simulation rules.
+- **Resource-aware decisions:** Models constrained defensive resources, including analyst-hours.
+- **Event logging and replay:** Records simulation activity to support debugging and reproducibility.
+- **Evaluation framework:** Compares strategies using outcomes, service availability, resource use, and decision metrics.
+- **Automated tests:** Tests the simulation engine, action transitions, observations, providers, and evaluation behavior.
+- **Dashboard and API:** Provides supporting interfaces for interacting with and inspecting the simulation, where configured.
 
+## Architecture
 
-Each output path is created if necessary. Use the same seed list and tick limit when comparing providers so the comparison is as fair as possible.
-Optional: use a local LLM with Ollama
-The LLM provider talks to an OpenAI-compatible chat-completions endpoint. Ollama is one supported local option.
-1. Install and start Ollama.
-2. Pull a model, for example:
-   ollama pull qwen2.5:7b
-3. Configure the endpoint and model in the same PowerShell session where you will run NEXUS:
-   $env:NEXUS_LLM_BASE_URL = "http://127.0.0.1:11434/v1"
-   $env:NEXUS_LLM_MODEL = "qwen2.5:7b"
-4. Run a short smoke test:
-   python -m simulation.cli --with-llm --seeds 7 --ticks 2 --timeout 30 --output artifacts/nexus-ollama-smoke.json
-5. If the smoke test is healthy, evaluate containment over multiple seeds:
-   python -m simulation.cli --mode containment --with-llm --seeds 7,17,31,42,71,101,202,303,404,505 --ticks 7 --timeout 30 --output artifacts/nexus-llm-containment.json
-6. Run the active-attack scenario separately:
-   python -m simulation.cli --mode active_attack --with-llm --seeds 7,17,31,42,71,101,202,303,404,505 --ticks 7 --timeout 30 --output artifacts/nexus-llm-active-attack.json
-The CLI does not start Ollama automatically. If the server or model is unavailable, fix that before interpreting model results. PowerShell environment variables set with $env: apply only to the current terminal session. Never commit credentials or private endpoint details to the repository.
-Understand the results
-The CLI writes a JSON report to the path passed to --output. Open it in VS Code or inspect it in PowerShell:
-Get-Content .\artifacts\nexus-evaluation.json
-Review metrics together rather than relying on a single headline number:
-- Containment result: whether the scenario's current containment condition was met.
-- Final compromised hosts: whether any host remains compromised at the end.
-- Service availability: how many services remain available under the scenario's availability rules.
-- Resources: defensive analyst-hours or other tracked resources consumed.
-- Exfiltration: data exfiltrated, when reported for the selected scenario.
-- Decision quality and reliability: proposed and accepted actions, rejected decisions, provider failures, fallback use, and latency where available.
-- Replay and determinism: whether the recorded run can be verified against the expected state.
-Interpret metrics carefully. A run can satisfy the simulator's containment condition while a host remains compromised—for example, if isolation is sufficient for the containment rule. Always inspect the final host state and service availability alongside containment. A run completed using fallback decisions is not the same as a fully model-driven run. NEXUS does not assume that the LLM outperforms the scripted baseline; use the generated results to determine that.
-Benchmarks
-The benchmark modules measure different aspects of the deterministic engine. They are separate from the LLM evaluation: engine throughput does not demonstrate LLM quality or GPU acceleration.
-Deterministic engine benchmark
-python -m simulation.benchmark --seeds 7,17,42 --ticks 20 --repeats 5 --warmups 1 --output artifacts/nexus-stage4-benchmark.json
-Workload scaling benchmark
-python -m simulation.scaling_benchmark --sizes 2:3,10:10,50:50 --seeds 7,17,42 --ticks 20 --repeats 3 --warmups 1 --output artifacts/nexus-scaling-benchmark.json
-Here each workload size is written as AGENTS:HOSTS.
-State-changing workload scaling benchmark
-python -m simulation.stateful_scaling_benchmark --sizes 2:3,10:10,50:50 --seeds 7,17,42 --ticks 50 --repeats 3 --warmups 1 --output artifacts/nexus-stateful-scaling.json
-Compare benchmark reports
-After the no-op and stateful scaling reports exist:
-python -m simulation.compare_benchmarks --noop artifacts/nexus-scaling-benchmark.json --stateful artifacts/nexus-stateful-scaling.json --output artifacts/nexus-stage4-comparison.json --markdown-output artifacts/nexus-stage4-comparison.md
-Record the hardware, Python version, configuration, seeds, tick count, warm-ups, and repetitions when sharing benchmark numbers. Do not present engine-only throughput as model inference throughput or make GPU claims without measurements on the stated hardware and runtime.
-Repository map
+NEXUS separates simulation correctness from AI reasoning.
+
+```text
+                 NEXUS
+                   |
+       +-----------+-----------+
+       |                       |
+ Simulation Engine       Decision Providers
+       |                       |
+ World State             Scripted Policies
+ Scheduler               Local LLM
+ Action Validation       OpenAI-Compatible API
+       |                       |
+       +-----------+-----------+
+                   |
+           Validated Decisions
+                   |
+           State Transitions
+                   |
+          Events and Metrics
+                   |
+        Replay and Evaluation
+```
+
+### Simulation Engine
+
+The engine owns the authoritative world state, schedules agent decisions, validates actions, applies transitions, tracks resources, and records events.
+
+Given the same initial state, random seed, and accepted decisions, the deterministic engine is designed to reproduce the same simulation outcome.
+
+### Decision Providers
+
+Decision providers propose actions for simulated agents. These may be deterministic policies or an LLM.
+
+LLM output is not permitted to directly mutate the world state. Proposed actions must pass the engine's validation rules before they can affect the simulation.
+
+### Evaluation Layer
+
+The evaluation layer runs scenarios and collects metrics so different decision strategies can be compared under consistent conditions.
+
+## Project Structure
+
+The following is a logical guide to the major project areas. Exact files may vary by checkout.
+
+```text
 NEXUS/
 ├── backend/
-│   ├── __init__.py                 # Backend package
-│   └── api/
-│       ├── __init__.py             # API package
-│       └── main.py                 # Local HTTP API and dashboard server
-├── dashboard/
-│   └── index.html                  # Browser-based cyber simulation dashboard
-├── scenarios/
-│   ├── __init__.py                 # Scenario package
-│   └── cyber_containment.py        # Scenario setup and initial world builders
+│   └── api/                 # Backend API entry points
 ├── simulation/
-│   ├── agents/
-│   │   ├── base_agent.py           # Base agent abstraction
-│   │   └── scripted.py             # Scripted agent behavior
-│   ├── __main__.py                 # Enables: python -m simulation
-│   ├── __init__.py                 # Simulation package
-│   ├── actions.py                  # Action and decision structures
-│   ├── baselines.py                # Do-nothing and scripted policy baselines
-│   ├── benchmark.py                # Deterministic engine benchmark
-│   ├── cli.py                      # Main evaluation CLI
-│   ├── compare_benchmarks.py       # Compare benchmark output files
-│   ├── decision_provider.py        # Decision-provider contract
-│   ├── evaluation.py               # Evaluation metrics and summaries
-│   ├── events.py                   # Simulation event records
-│   ├── experiment.py               # Seeded runs and policy comparisons
-│   ├── llm_provider.py             # OpenAI-compatible model integration and fallback
-│   ├── observations.py             # Scoped agent observations
-│   ├── policy.py                   # Policy/action validation and permissions
-│   ├── replay.py                   # Trace serialization and replay verification
-│   ├── scaling_benchmark.py        # Engine workload scaling benchmark
-│   ├── scheduler.py                # Agent scheduling and action application
-│   ├── stateful_scaling_benchmark.py # State-changing scaling benchmark
-│   ├── transitions.py              # Authoritative world-state transitions
-│   ├── workloads.py                # Benchmark workload construction
-│   └── world.py                    # Core world state and simulation model
-├── tests/                          # Automated tests for engine, API, replay, and benchmarks
-├── artifacts/                      # Saved JSON/Markdown reports; new outputs are generated here
-├── ARCHITECTURE.md                 # System architecture and data flow
-├── BENCHMARKS.md                   # Benchmark methodology and interpretation
-├── DASHBOARD.md                    # Dashboard setup, API routes, and scope
-├── DECISIONS.md                    # Architecture decision records
-├── GPU_INDEPENDENT_MILESTONE.md    # GPU-independent milestone notes
-├── NEXUS_STAGE3_SAFETY_PATCH.md    # Safety-related patch notes
-├── PROJECT_SPEC.md                 # Project requirements and scope
-├── STAGE2_PHASE3_PHASE4.md         # Stage 2 implementation notes
-├── STAGE3_LOCAL_CHECKPOINT.md      # Local checkpoint notes
-├── STAGE3_RELIABILITY_PATCH.md     # Reliability patch notes
-├── STAGE4D_RELIABILITY_AUDIT.md    # Reliability audit notes
-├── STAGE5_DECISION_QUALITY.md      # Decision-quality evaluation notes
-├── STAGE6_CANDIDATE_AI_EVALUATION.md # Candidate model-evaluation notes, if present
-├── requirements.txt                # Minimal development dependency list
-└── .gitignore
-artifacts/ contains generated or retained experiment outputs. These JSON files are evidence for the specific configurations that produced them, not universal performance guarantees. The .venv/, cache directories, and other machine-specific files are intentionally not listed above.
-Key modules
-Module	Responsibility
-simulation/world.py	Authoritative world state, hosts, agents, network, resources, and simulation state
-simulation/transitions.py	Applies validated state transitions and records their effects
-simulation/scheduler.py	Coordinates agents and simulation ticks
-simulation/observations.py	Builds scoped observations for agents without granting direct state mutation
-simulation/decision_provider.py	Defines the decision-provider interface
-simulation/llm_provider.py	Calls an OpenAI-compatible model endpoint and handles provider/fallback behavior
-simulation/experiment.py	Runs seeded experiments and compares providers
-simulation/evaluation.py	Derives run-level and aggregate evaluation metrics
-simulation/replay.py	Serializes traces and checks replay consistency
-backend/api/main.py	Serves the local API and dashboard assets
+│   ├── agents/              # Agent-related abstractions, if present
+│   ├── world.py             # World state
+│   ├── policy.py            # Policy configuration
+│   ├── policies.py          # Policy implementations, if present
+│   ├── scheduler.py         # Simulation scheduling
+│   ├── transitions.py       # Validated state transitions
+│   ├── observations.py      # Agent-specific observations
+│   ├── decision_provider.py # Decision provider interfaces
+│   ├── llm_provider.py      # LLM integration
+│   ├── baselines.py         # Baseline strategies
+│   ├── evaluation.py        # Evaluation utilities
+│   ├── replay.py             # Replay and trace utilities
+│   └── cli.py               # Command-line interface
+├── scenarios/
+│   └── cyber_containment.py # Cyber scenario definitions
+├── tests/                   # Automated tests
+├── artifacts/               # Generated evaluation outputs
+├── dashboard/               # Dashboard files, if present
+├── README.md
+├── ARCHITECTURE.md
+├── PROJECT_SPEC.md
+├── DECISIONS.md
+└── BENCHMARKS.md
+```
 
+Some modules and folders are optional or may have different names across development stages. Check the actual repository before relying on a particular path.
 
-Troubleshooting
-No module named pytest
-Activate .venv and run python -m pip install -r requirements.txt, then retry python -m pytest -q.
---with-llm says environment variables are required
-Set both NEXUS_LLM_BASE_URL and NEXUS_LLM_MODEL in the current PowerShell session before running the CLI.
-Connection refused or timeout
-Verify Ollama is running and the model is installed with ollama list. Confirm the base URL ends in /v1 and try the two-tick smoke test before the longer evaluation.
-Unexpected fallback decisions
-Inspect the output JSON for provider failures, invalid/rejected actions, and fallback counts. Do not interpret fallback-only behavior as successful model inference.
-Dashboard does not load
-Start the server from the repository root with python -m backend.api.main, then open http://127.0.0.1:8765. Check whether NEXUS_PORT was changed in the current shell.
-Documentation guide
-- Start here for installation and run commands: README.md.
-- Read PROJECT_SPEC.md for scope and requirements.
-- Read ARCHITECTURE.md for the engine/provider separation and data flow.
-- Read DASHBOARD.md for dashboard and API details.
-- Read BENCHMARKS.md for benchmark methodology.
-- Read DECISIONS.md for recorded design decisions.
-- Read the stage/checkpoint documents for implementation history and audit notes.
-Scope and limitations
-- NEXUS is a controlled simulation and evaluation prototype, not a production SOC platform.
-- The active attacker is simulated in memory; no real network is contacted.
-- The dashboard uses deterministic baselines and is not an LLM benchmark.
-- Results depend on scenario rules, seed selection, tick limits, model configuration, and fallback behavior.
-- Local inference latency depends on the model, quantization, runtime, and machine.
-- GPU acceleration does not make the simulation's deterministic transitions more correct by itself.
-- Publish performance claims only with repeatable, configuration-specific measurements.
-License
-Add or link the project's chosen license before public distribution or accepting external contributions.
+## Requirements
+
+- Windows, Linux, or macOS
+- Python version supported by the project's dependencies
+- Git
+- Python virtual environment
+- Optional: [Ollama](https://ollama.com/) and a compatible local language model for LLM-driven simulation
+
+For the Windows commands below, run PowerShell from the NEXUS repository root.
+
+## Installation
+
+### 1. Open the repository
+
+```powershell
+cd C:\Users\dandu\NEXUS
+```
+
+### 2. Activate the virtual environment
+
+If `.venv` already exists:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+If it does not exist, create it using an installed Python version compatible with the project's dependencies:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+### 3. Install dependencies
+
+```powershell
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+If PowerShell blocks environment activation, use the virtual environment interpreter directly:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+## Quick Start
+
+### Run a simulation without an LLM
+
+Start with a small, reproducible containment run:
+
+```powershell
+python -m simulation.cli --seeds 7 --ticks 5 --output artifacts/nexus-smoke.json
+```
+
+This exercises the configured default simulation mode and writes its results to the specified JSON file.
+
+### Run a containment simulation
+
+```powershell
+python -m simulation.cli --mode containment --seeds 7,17,31 --ticks 5 --output artifacts/nexus-containment.json
+```
+
+### Run an active-attack simulation
+
+```powershell
+python -m simulation.cli --mode active_attack --seeds 7,17,31 --ticks 5 --output artifacts/nexus-active-attack.json
+```
+
+The seed list controls which initial random conditions are evaluated. Increasing the number of seeds helps reveal whether results are consistent across different initial conditions.
+
+Use the CLI help to verify the options supported by your current checkout:
+
+```powershell
+python -m simulation.cli --help
+```
+
+## Running the LLM
+
+NEXUS can use an OpenAI-compatible local inference endpoint. For the local Ollama configuration, first install Ollama and download the desired model.
+
+For example:
+
+```powershell
+ollama pull qwen2.5:7b
+```
+
+Configure the endpoint and model in PowerShell:
+
+```powershell
+$env:NEXUS_LLM_BASE_URL = "http://127.0.0.1:11434/v1"
+$env:NEXUS_LLM_MODEL = "qwen2.5:7b"
+```
+
+Verify that Ollama is running and that the model is available:
+
+```powershell
+ollama list
+```
+
+Then run a small LLM-enabled test:
+
+```powershell
+python -m simulation.cli --with-llm --seeds 7 --ticks 2 --timeout 30 --output artifacts/nexus-llm-smoke.json
+```
+
+If the LLM provider is unavailable, check the endpoint, model name, server status, and timeout configuration.
+
+**Important:** LLM inference may be substantially slower than deterministic policies. The actual latency depends on the model, hardware, prompt size, concurrency, and inference configuration.
+
+## Simulation Modes
+
+### Containment
+
+The containment mode evaluates defensive decisions in a cyber incident. Depending on the scenario and policy, defensive actions may isolate affected hosts, patch vulnerabilities, or preserve system availability.
+
+### Active Attack
+
+The active-attack mode evaluates behavior under an ongoing attack scenario. It can help investigate defensive responses, attack progression, service impact, and resource trade-offs.
+
+The exact actions and metrics depend on the scenario implementation. Consult the scenario code and generated evaluation artifacts for the authoritative definitions.
+
+## Evaluation and Benchmarks
+
+NEXUS supports comparisons between decision strategies, including:
+
+| Strategy | Purpose |
+|---|---|
+| Do-nothing baseline | Establishes an inactive-response reference |
+| Scripted defensive baseline | Provides a deterministic defensive reference |
+| LLM-driven strategy | Evaluates model-generated decisions under the same simulation framework |
+
+For a fair comparison, keep scenario configuration, seeds, tick limits, and resource constraints consistent.
+
+### Example evaluation
+
+```powershell
+python -m simulation.cli --mode containment --seeds 7,17,31,42,71 --ticks 7 --output artifacts/nexus-containment-evaluation.json
+```
+
+Run the same configuration with LLM inference enabled:
+
+```powershell
+python -m simulation.cli --mode containment --with-llm --seeds 7,17,31,42,71 --ticks 7 --timeout 30 --output artifacts/nexus-containment-llm.json
+```
+
+Repeat for `active_attack` when comparing both scenario modes.
+
+These commands illustrate evaluation runs; they do not, by themselves, guarantee that every baseline is included in each output. Confirm the actual provider and comparison behavior in the current CLI implementation.
+
+### Metrics to examine
+
+- **Containment success:** Whether the implementation's containment criterion was satisfied.
+- **Compromised hosts:** The number of hosts that remain compromised at the end of a run.
+- **Service availability:** How many services remain operational.
+- **Analyst-hours:** Defensive resources consumed.
+- **Action acceptance rate:** The proportion of proposed actions accepted by validation.
+- **Fallback rate:** How frequently fallback behavior replaces an LLM decision.
+- **Decision latency:** Time spent waiting for model responses.
+- **Exfiltrated data:** Data exfiltration recorded by the scenario, where applicable.
+
+Interpret metrics together. For example, a run can satisfy the implementation's containment criterion while a host remains compromised. Containment success alone should not be interpreted as proof that all compromised hosts were remediated.
+
+Do not claim that the LLM outperforms scripted defense unless repeated, comparable runs support that conclusion.
+
+## Tests
+
+Run the full test suite from the repository root:
+
+```powershell
+python -m pytest -q
+```
+
+Run a syntax compilation check:
+
+```powershell
+python -m compileall -q simulation scenarios tests
+```
+
+Check for whitespace errors in Git changes:
+
+```powershell
+git diff --check
+```
+
+Tests validate implemented behavior; they do not substitute for performance measurements on the target hardware.
+
+## Understanding Results
+
+Generated JSON files are written to the path specified by `--output`.
+
+Inspect a result file in PowerShell:
+
+```powershell
+Get-Content .\artifacts\nexus-smoke.json
+```
+
+For larger artifacts, use an editor or JSON viewer.
+
+When reviewing a run, verify:
+
+1. The scenario mode and seed configuration.
+2. The number of completed ticks.
+3. Which provider generated the decisions.
+4. Whether actions were accepted or rejected.
+5. Whether any timeouts or fallback decisions occurred.
+6. Final compromise and service-availability metrics.
+7. Resource consumption and decision latency.
+8. Whether the reported result is consistent across multiple seeds.
+
+Keep generated benchmark outputs with their configuration so results can be reproduced and audited.
+
+## Documentation
+
+Consult the documentation files present in your checkout for additional detail:
+
+- `ARCHITECTURE.md` — architecture and module responsibilities.
+- `PROJECT_SPEC.md` — project scope and requirements.
+- `DECISIONS.md` — recorded design decisions.
+- `BENCHMARKS.md` — benchmark methodology and results.
+- `DASHBOARD.md` — dashboard usage, if included.
+- Stage-specific notes — implementation history, reliability audits, and evaluation findings.
+
+Not every development note is intended as a public-facing project guide. Keep this README as the main entry point and use the detailed documents for implementation-specific information.
+
+## Limitations
+
+- This is a simulation, not a production cyber-defense system.
+- Simulated outcomes do not establish real-world security effectiveness.
+- LLM decisions may be invalid, inconsistent, slow, or dependent on the selected model.
+- Fallback behavior improves operational resilience but can affect comparisons.
+- Results depend on scenario design, initial conditions, model configuration, and evaluation methodology.
+- Hardware acceleration benefits must be established through measurements rather than assumed.
+- A successful test suite does not prove that all scenarios or edge cases are correct.
+
+## Project Goal
+
+NEXUS aims to make high-stakes decision evaluation measurable and reproducible by combining a controlled simulation engine with interchangeable decision-making strategies.
+
+The objective is not merely to generate AI recommendations. It is to evaluate what those recommendations actually do inside a simulation, what they cost, and how their outcomes compare against explicit baselines.
